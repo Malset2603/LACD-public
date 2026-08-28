@@ -32,6 +32,10 @@ if __name__ == "__main__":
 
     parser.add_argument("--mode", type=str, choices=["inference", "test-benchmark"], help="benchmark test or inference once", default="inference")
 
+    # debug mode: limit the number of samples to ensure a fast run
+    parser.add_argument("--debug", action="store_true", help="enable debug mode: run on limited samples")
+    parser.add_argument("--debug_limit", type=int, default=5, help="number of samples to process in debug mode (only when --debug)")
+
     # crossencoder vector index 사용하는지도 필요함.
     # GNN method 적어야 함.
 
@@ -163,6 +167,10 @@ if __name__ == "__main__":
                 row = json.loads(line.strip())  # 각 줄을 JSON으로 파싱
                 rows.append(row)
 
+        if args.debug:
+            print(f"[DEBUG] limiting test-benchmark from {len(rows)} to {args.debug_limit} samples")
+            rows = rows[:args.debug_limit]
+
         true_count = 0
         false_count = 0
 
@@ -221,7 +229,8 @@ if __name__ == "__main__":
             result_list.append({"article_to_check": article_to_check, "articles": articles})
 
         # result_list를 jsonl 파일로 저장
-        with open("./outputs/retrieval_results/{0}_{1}_{2}{3}.jsonl".format(args.biencoder_method,crossencoder_index_method ,args.crossencoder_method,"_noLM" if "noLM" in crossencoder_model_path else ""), 'w', encoding='utf-8') as outfile:
+        suffix = "_debug" if args.debug else ""
+        with open("./outputs/retrieval_results/{0}_{1}_{2}{3}{4}.jsonl".format(args.biencoder_method,crossencoder_index_method ,args.crossencoder_method,"_noLM" if "noLM" in crossencoder_model_path else "", suffix), 'w', encoding='utf-8') as outfile:
             for result in result_list:
                 json.dump(result, outfile, ensure_ascii=False)
                 outfile.write('\n')  # 각 결과를 한 줄에 저장

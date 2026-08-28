@@ -37,6 +37,13 @@ if __name__ == "__main__":
     # biencoder method
     parser.add_argument("--biencoder_method",type=str,help="cosine or linear",default="cosine")
 
+    # debug mode: batasi sampel & epoch agar run cepat
+    parser.add_argument("--debug", action="store_true", help="enable debug mode: use limited samples and 1 epoch")
+    parser.add_argument("--debug_limit", type=int, default=20, help="number of samples per split in debug mode")
+
+    # batch size exposed (default 4 = original repo, backward compatible)
+    parser.add_argument("--batch_size", type=int, default=4, help="per_device train/eval batch size (original: 4)")
+
     args = parser.parse_args()
 
     case_multiplier = args.case_multiplier
@@ -58,6 +65,13 @@ if __name__ == "__main__":
     train_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl', lines=True)
     test_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl', lines=True)
     val_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl', lines=True)
+
+    if args.debug:
+        print(f"[DEBUG] limiting datasets to {args.debug_limit} samples per split, epoch=1")
+        train_df = train_df.head(args.debug_limit)
+        test_df = test_df.head(args.debug_limit)
+        val_df = val_df.head(args.debug_limit)
+        args.epoch = 1
 
 
     # Add 'case_idx' column to DataFrames
@@ -152,16 +166,16 @@ if __name__ == "__main__":
     training_args = TrainingArguments(
         output_dir=f"./outputs/LACD-bi/small-fine-tune/{tag}",  # Replaced
         num_train_epochs=epoch,
-        per_device_train_batch_size=4,
-        per_device_eval_batch_size=4,
+        per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=args.batch_size,
         warmup_steps=500,
         weight_decay=0,
         logging_dir=f"./outputs/LACD-bi/small-fine-tune/{tag}",  # Replaced
         logging_steps=10,
         eval_strategy="steps",
-        eval_steps=20,
+        eval_steps=20 if not args.debug else 5,
         save_strategy="steps",
-        save_steps=20,
+        save_steps=20 if not args.debug else 5,
         save_total_limit=1,
         load_best_model_at_end=True,
         metric_for_best_model="eval_roc_auc",  # Use roc_auc as metric

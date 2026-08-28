@@ -50,6 +50,9 @@ python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-be
 
 # Ours
 python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-caseaug --method case-augmentation
+
+# Debug - 20 samples, 1 epoch, batch 1 (fast smoke test, low VRAM)
+python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-baseline-debug --debug --debug_limit 20 --batch_size 1
 ```
 
 The models are saved in `/data/models/LACD-bi`. 
@@ -65,6 +68,9 @@ python ./src/main.py --biencoder_model_path ./data/models/LACD-bi/kbb-baseline -
 
 # Ours bi-encoder chroma DB (kbb-caseaug)
 python ./src/main.py --biencoder_model_path ./data/models/LACD-bi/kbb-caseaug --chroma_db_name kbb-caseaug --biencoder_method caseaug --retrieval_method bi-only
+
+# Debug (inference single article, no benchmark loop - already fast)
+python ./src/main.py --biencoder_model_path ./data/models/LACD-bi/kbb-baseline --chroma_db_name kbb-baseline --biencoder_method baseline --retrieval_method bi-only --biencoder_top_k 2
 ```
 
 Chroma DBs are saved in `/data/database/chroma_db`. Note that it takes amount of time. Alternatively, you can use provided Chroma DB file.
@@ -100,6 +106,17 @@ python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/qwen2-0.
 
 # CAM-Re2
 python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/gnns/kbb-baseline-gat-caseaugembds --biencoder_model_path ./data/models/LACD-bi/kbb-caseaug  --chroma_db_name kbb-caseaug --retrieval_method hybrid --crossencoder_index_method gat --crossencoder_method baseline --biencoder_method caseaug
+
+# Debug - single article + small top_k (fast, no model change)
+python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/qwen2-0.5-baseline --biencoder_model_path ./data/models/LACD-bi/kbb-baseline --chroma_db_name kbb-baseline --retrieval_method hybrid --crossencoder_index_method none --crossencoder_method baseline --biencoder_method baseline --biencoder_top_k 2 --crossencoder_top_k 2
+
+# Debug - benchmark on 5 samples only, output -> outputs/retrieval_results/*_debug.jsonl
+python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/qwen2-0.5-baseline --biencoder_model_path ./data/models/LACD-bi/kbb-baseline --chroma_db_name kbb-baseline --retrieval_method hybrid --crossencoder_index_method none --crossencoder_method baseline --biencoder_method baseline --mode test-benchmark --debug --debug_limit 5
+
+# Debug - classical retrievers (no GPU, fastest)
+python ./src/main.py --chroma_db_name kbb-baseline --biencoder_method baseline --retrieval_method tfidf --biencoder_top_k 2
+python ./src/main.py --chroma_db_name kbb-baseline --biencoder_method baseline --retrieval_method bm25 --biencoder_top_k 2
+python ./src/main.py --chroma_db_name kbb-baseline --biencoder_method baseline --retrieval_method tfidf --mode test-benchmark --debug --debug_limit 5
 ```
 
 ### Testing query processing time
@@ -108,6 +125,8 @@ You can check query processing time (One of Appendix experiments) by following c
 
 ```bash
 bash ./bash-files/retrieval/qps-test.sh
+# Debug - single top_k
+python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/kbb-baseline --biencoder_model_path ./data/models/LACD-bi/kbb-baseline --chroma_db_name kbb-baseline --retrieval_method hybrid --crossencoder_index_method none --crossencoder_method baseline --biencoder_method baseline --biencoder_top_k 2
 ```
 
 ## Ablation studies
@@ -130,4 +149,16 @@ python ./src/methods/LawGNN/train/crossencoder_finetune.py --tag kbb-baseline-gc
 
 
 python ./src/methods/LawGNN/train/crossencoder_finetune.py --tag kbb-baseline-graphsage-caseaugembds --gnn_method graphsage --chroma_db_name kbb-caseaug --case_augmentation_method baseline --epoch 3
+```
+
+### Debug mode
+
+All `src/main.py` runs support `--debug --debug_limit N` (default 5). In `test-benchmark` mode it slices `data/datasets/LACD-biclassification/train-test-divide/test.jsonl` to `N` samples and writes `*_debug.jsonl` to avoid overwriting full results. In `inference` mode use `--biencoder_top_k 2 --crossencoder_top_k 2` or `tfidf`/`bm25` for fastest check. `src/encoders/bi_encoder/train/finetune.py` also supports `--debug --debug_limit 20 --batch_size 1` (slices train/val/test to 20 samples, forces epoch=1; `batch_size` default 4 sesuai repo asli untuk skripsi, pakai 1 hanya untuk debug VRAM kecil).
+
+```bash
+# Example: every README command has a debug counterpart
+# Full:
+python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/gnns/kbb-baseline-gat-caseaugembds --biencoder_model_path ./data/models/LACD-bi/kbb-caseaug --chroma_db_name kbb-caseaug --retrieval_method hybrid --crossencoder_index_method gat --crossencoder_method baseline --biencoder_method caseaug --mode test-benchmark
+# Debug (5 samples):
+python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/gnns/kbb-baseline-gat-caseaugembds --biencoder_model_path ./data/models/LACD-bi/kbb-caseaug --chroma_db_name kbb-caseaug --retrieval_method hybrid --crossencoder_index_method gat --crossencoder_method baseline --biencoder_method caseaug --mode test-benchmark --debug --debug_limit 5
 ```
