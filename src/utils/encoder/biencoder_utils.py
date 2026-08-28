@@ -21,6 +21,14 @@ class BiEncoderModel(torch.nn.Module):
             # Linear layer for classification
             self.classifier = torch.nn.Linear(hidden_size * 2, 1)  # Binary classification
 
+    def gradient_checkpointing_enable(self, gradient_checkpointing_kwargs=None):
+        if hasattr(self.encoder, "gradient_checkpointing_enable"):
+            self.encoder.gradient_checkpointing_enable(gradient_checkpointing_kwargs)
+
+    def gradient_checkpointing_disable(self):
+        if hasattr(self.encoder, "gradient_checkpointing_disable"):
+            self.encoder.gradient_checkpointing_disable()
+
     def forward(
         self,
         input_ids_a=None,

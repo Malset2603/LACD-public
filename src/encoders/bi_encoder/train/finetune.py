@@ -80,6 +80,7 @@ if __name__ == "__main__":
         test_df = test_df.head(args.debug_limit)
         val_df = val_df.head(args.debug_limit)
         args.epoch = 1
+        epoch = 1
 
 
     # Add 'case_idx' column to DataFrames
