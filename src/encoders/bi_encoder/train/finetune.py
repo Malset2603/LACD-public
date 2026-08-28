@@ -44,6 +44,11 @@ if __name__ == "__main__":
     # batch size exposed (default 4 = original repo, backward compatible)
     parser.add_argument("--batch_size", type=int, default=4, help="per_device train/eval batch size (original: 4)")
 
+    # opsi 2 & 3: max_length & fp16 (default = original, backward compatible)
+    parser.add_argument("--max_length", type=int, default=4096, help="max token length (original: 4096, use 512 for debug on 2GB GPU)")
+    parser.add_argument("--fp16", action="store_true", help="enable fp16 training (original: false)")
+    parser.add_argument("--gradient_checkpointing", action="store_true", help="enable gradient checkpointing to save VRAM")
+
     args = parser.parse_args()
 
     case_multiplier = args.case_multiplier
@@ -57,6 +62,9 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.add_special_tokens({"pad_token": "[PAD]"})
     model.encoder.config.pad_token_id = tokenizer.pad_token_id
+    if args.gradient_checkpointing and hasattr(model.encoder, "gradient_checkpointing_enable"):
+        model.encoder.gradient_checkpointing_enable()
+        print("[INFO] gradient checkpointing enabled")
 
     if args.method == "case-augmentation" or args.method == "case-concat-augmentation":
         from src.methods.case_augmentation.prompt import case_cache_start, case_cache_end
@@ -121,7 +129,7 @@ if __name__ == "__main__":
             encoding_a = self.tokenizer.encode_plus(
                 text=premise,
                 add_special_tokens=True,
-                max_length=MAX_TOKEN_LENGTH,
+                max_length=self.max_length,
                 padding="max_length",
                 truncation=True,
                 return_tensors="pt",
@@ -129,7 +137,7 @@ if __name__ == "__main__":
             encoding_b = self.tokenizer.encode_plus(
                 text=hypothesis,
                 add_special_tokens=True,
-                max_length=MAX_TOKEN_LENGTH,
+                max_length=self.max_length,
                 padding="max_length",
                 truncation=True,
                 return_tensors="pt",
@@ -148,14 +156,21 @@ if __name__ == "__main__":
             label_counts = self.dataframe["answer"].value_counts().to_dict()
             print(f"Label distribution: {label_counts}")
 
+    # use --max_length if provided, fallback to original constant
+    effective_max_length = args.max_length if args.max_length else MAX_TOKEN_LENGTH
+    if args.debug and args.max_length == 4096:
+        # auto-reduce for debug on small GPU if user didn't specify
+        print(f"[DEBUG] auto-reducing max_length 4096 -> 512 for 2GB GPU debug")
+        effective_max_length = 512
+
     train_dataset = NLIDataset(
-        train_df, tokenizer, max_length=MAX_TOKEN_LENGTH, method=args.method
+        train_df, tokenizer, max_length=effective_max_length, method=args.method
     )
     test_dataset = NLIDataset(
-        test_df, tokenizer, max_length=MAX_TOKEN_LENGTH, method=args.method
+        test_df, tokenizer, max_length=effective_max_length, method=args.method
     )
     val_dataset = NLIDataset(
-        val_df, tokenizer, max_length=MAX_TOKEN_LENGTH, method=args.method
+        val_df, tokenizer, max_length=effective_max_length, method=args.method
     )
 
     print(f"Token limit for {args.model}: {tokenizer.model_max_length}")
@@ -181,6 +196,8 @@ if __name__ == "__main__":
         metric_for_best_model="eval_roc_auc",  # Use roc_auc as metric
         greater_is_better=True,
         report_to="tensorboard",
+        fp16=args.fp16,
+        gradient_checkpointing=args.gradient_checkpointing,
     )
 
     

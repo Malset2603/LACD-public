@@ -51,8 +51,8 @@ python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-be
 # Ours
 python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-caseaug --method case-augmentation
 
-# Debug - 20 samples, 1 epoch, batch 1 (fast smoke test, low VRAM)
-python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-baseline-debug --debug --debug_limit 20 --batch_size 1
+# Debug - 20 samples, 1 epoch, batch 1, 512 tokens, fp16 (fast smoke test, 2GB GPU)
+python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-baseline-debug --debug --debug_limit 20 --batch_size 1 --max_length 512 --fp16 --gradient_checkpointing
 ```
 
 The models are saved in `/data/models/LACD-bi`. 
@@ -153,7 +153,7 @@ python ./src/methods/LawGNN/train/crossencoder_finetune.py --tag kbb-baseline-gr
 
 ### Debug mode
 
-All `src/main.py` runs support `--debug --debug_limit N` (default 5). In `test-benchmark` mode it slices `data/datasets/LACD-biclassification/train-test-divide/test.jsonl` to `N` samples and writes `*_debug.jsonl` to avoid overwriting full results. In `inference` mode use `--biencoder_top_k 2 --crossencoder_top_k 2` or `tfidf`/`bm25` for fastest check. `src/encoders/bi_encoder/train/finetune.py` also supports `--debug --debug_limit 20 --batch_size 1` (slices train/val/test to 20 samples, forces epoch=1; `batch_size` default 4 sesuai repo asli untuk skripsi, pakai 1 hanya untuk debug VRAM kecil).
+All `src/main.py` runs support `--debug --debug_limit N` (default 5). In `test-benchmark` mode it slices `data/datasets/LACD-biclassification/train-test-divide/test.jsonl` to `N` samples and writes `*_debug.jsonl` to avoid overwriting full results. In `inference` mode use `--biencoder_top_k 2 --crossencoder_top_k 2` or `tfidf`/`bm25` for fastest check. `src/encoders/bi_encoder/train/finetune.py` also supports `--debug --debug_limit 20 --batch_size 1 --max_length 512 --fp16 --gradient_checkpointing` (slices train/val/test to 20 samples, forces epoch=1; defaults `batch_size 4`, `max_length 4096`, `fp16/gradient_checkpointing false` sesuai repo asli untuk skripsi — pakai nilai kecil/hanya untuk debug VRAM 2GB).
 
 ```bash
 # Example: every README command has a debug counterpart
