@@ -166,3 +166,4 @@ data/database/
 data/models/
 data/database/chroma_db/
 outputs/
+runs/
