@@ -167,3 +167,6 @@ data/models/
 data/database/chroma_db/
 outputs/
 runs/
+
+# Local research notes (thesis drafts, not for remote)
+docs/
