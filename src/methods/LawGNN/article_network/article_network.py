@@ -4,13 +4,15 @@ import tqdm
 import csv
 
 class ArticleNetwork:
-    def __init__(self, laws_path="./data/database/laws.csv", law_link_path = "./data/database/law_link_20240930_duplicate_eliminate.jsonl"):
+    def __init__(self, laws_path="./data/database/laws.csv", law_link_path = "./data/database/law_link_20240930_duplicate_eliminate.jsonl", mini_laws=None, mini_seed=42):
         # Dictionary to store the network (adjacency list)
         self.article_network = {}
         # Dictionary to store the article key to index mapping
         self.article_key_to_idx = {}
         # List to store all article keys
         self.all_article_keys = []
+        self.mini_laws = mini_laws
+        self.mini_seed = mini_seed
         
         # Load all articles from laws_html.jsonl
         self._load_nodes(laws_path)
@@ -20,12 +22,46 @@ class ArticleNetwork:
         # TODO: article 수정해야 함.
         # print("Loading article nodes...")
 
-        reader = csv.DictReader(open(laws_path))
+        reader = csv.DictReader(open(laws_path, encoding='utf-8', errors='ignore'))
         for row in reader:
             article_key = row['article_title']
             article_key = article_key.replace("·", "ㆍ")
 
             self.all_article_keys.append(article_key)
+
+        # mini_laws via argumen: graph-aware sampling (hub-preserving + random) agar tetap representatif
+        if self.mini_laws is not None and self.mini_laws < len(self.all_article_keys):
+            import random
+            import collections
+            # degree-aware: hitung degree dari law_link sebelum filter
+            # untuk mini_laws kecil, keep top hubs + random rest
+            # load degrees quickly if law_link exists
+            try:
+                deg = collections.Counter()
+                import json as _json
+                # quick pass to compute deg (only if not too large)
+                with open("./data/database/law_link_20240930_duplicate_eliminate.jsonl", 'r', encoding='utf-8') as _f:
+                    for _line in _f:
+                        _d = _json.loads(_line)
+                        deg[_d['source_key']] += 1
+                        deg[_d['target_key']] += 1
+                # sort by degree desc
+                sorted_keys = sorted(self.all_article_keys, key=lambda k: deg.get(k, 0), reverse=True)
+                n_hub = min(self.mini_laws // 2, len(sorted_keys))
+                hubs = sorted_keys[:n_hub]
+                remaining = [k for k in self.all_article_keys if k not in hubs]
+                rnd = random.Random(self.mini_seed)
+                rnd.shuffle(remaining)
+                keep = set(hubs + remaining[: self.mini_laws - n_hub])
+                self.all_article_keys = [k for k in self.all_article_keys if k in keep]
+                # ensure exact count (set may dedup if any overlap, but hubs and remaining disjoint by construction)
+                print(f"[MINI] laws sampled -> {len(self.all_article_keys)} (hubs {n_hub} + random {self.mini_laws - n_hub}) seed={self.mini_seed} target {self.mini_laws}")
+            except Exception as e:
+                # fallback random
+                rnd = random.Random(self.mini_seed)
+                rnd.shuffle(self.all_article_keys)
+                self.all_article_keys = self.all_article_keys[: self.mini_laws]
+                print(f"[MINI] laws random sample -> {len(self.all_article_keys)} (fallback {e})")
 
         # Create a mapping from article key to index
         self.article_key_to_idx = {key: idx for idx, key in enumerate(self.all_article_keys)}
