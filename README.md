@@ -151,9 +151,51 @@ python ./src/methods/LawGNN/train/crossencoder_finetune.py --tag kbb-baseline-gc
 python ./src/methods/LawGNN/train/crossencoder_finetune.py --tag kbb-baseline-graphsage-caseaugembds --gnn_method graphsage --chroma_db_name kbb-caseaug --case_augmentation_method baseline --epoch 3
 ```
 
+### Mini mode via arguments (fast yet representative — for thesis experiments)
+
+> A **stratified**, **graph-aware** alternative to `--debug`. No need to create a new dataset, simply add arguments. The original files are loaded in full and then sliced in-memory.
+
+| Argument | Default | Effect |
+|----------|---------|--------|
+| `--mini_ratio 0.15` | `None` (full) | Stratified fraction `(0,1]` for `train/val/test.jsonl` preserving `P(y=1)=12.8%`. E.g., `0.15` = `1399->209`, `469->70`. Statistically representative, unlike `--debug` `head(N)`. |
+| `--mini_laws 2000` | `None` (79k) | Limits `LMGraph` `ArticleNetwork` with hub-preserving sampling: `50%` top-degree + `50%` random. `2000` nodes `~7.9k` edges vs `79k/339k` full. Chroma build `~4 min` vs `~60 min`. |
+| `--mini_seed 42` | `42` | Reproducible seed for both sampling operations above. |
+
+Mini outputs are automatically suffixed `_mini15_laws2000` to avoid overwriting full results, e.g., `*_mini15_laws2000.jsonl`.
+
+**When to use which:**
+* `debug` (`head`): bug smoke test, `<10s`, metrics **not** representative.
+* `mini` (`stratified`): hyperparameter tuning (`tau/alpha/epoch`), GNN ablations, `Spearman Recall@50 >0.85` vs full, `~10x` faster.
+
+```bash
+# Bi-encoder training — mini 15% + 2k articles, 512 tokens, fp16 (4 min on 2GB GPU) — recommended default for thesis
+python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-mini15 --mini_ratio 0.15 --mini_laws 2000 --max_length 512 --fp16 --batch_size 4 --epoch 3
+
+# Bi-encoder training — mini 10% for rapid sweeps
+python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-mini10 --mini_ratio 0.1 --mini_laws 2000 --max_length 512 --fp16 --batch_size 4 --epoch 1
+
+# Build Chroma DB mini (2k articles only) — must use the same mini_laws as training to keep the graph consistent
+python ./src/main.py --biencoder_model_path ./data/models/LACD-bi/kbb-mini15 --chroma_db_name kbb-mini --biencoder_method baseline --retrieval_method bi-only --mini_laws 2000
+
+# Cross-encoder GNN training — mini 10%
+python ./src/methods/LawGNN/train/crossencoder_finetune.py --tag kbb-gat-mini10 --gnn_method gat --chroma_db_name kbb-mini --case_augmentation_method baseline --epoch 3 --mini_ratio 0.1 --mini_laws 2000 --max_length 512 --fp16
+
+# Benchmark — mini 20% (93 samples instead of 469) — 5x faster, still stratified
+python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/gnns/kbb-gat-mini10 --biencoder_model_path ./data/models/LACD-bi/kbb-mini15 --chroma_db_name kbb-mini --retrieval_method hybrid --crossencoder_index_method gat --crossencoder_method baseline --biencoder_method baseline --mode test-benchmark --mini_ratio 0.2 --mini_laws 2000
+# output -> outputs/retrieval_results/*_mini20_laws2000.jsonl
+
+# Classical retriever mini (no GPU, <10s)
+python ./src/main.py --chroma_db_name kbb-mini --retrieval_method tfidf --mini_laws 2000 --mini_ratio 0.2 --mode test-benchmark
+
+# Combine mini + debug for ultra-fast smoke test (5 samples drawn from the 15% stratified mini)
+python ./src/main.py --chroma_db_name kbb-mini --retrieval_method hybrid --mini_ratio 0.15 --mini_laws 2000 --mode test-benchmark --debug --debug_limit 5 --biencoder_top_k 2 --crossencoder_top_k 2
+```
+
+> Tip: `mini` and `debug` can be combined. `mini_ratio` is applied first (stratified `209`), then `debug` takes `head(5)` from that subset.
+
 ### Debug mode
 
-All `src/main.py` runs support `--debug --debug_limit N` (default 5). In `test-benchmark` mode it slices `data/datasets/LACD-biclassification/train-test-divide/test.jsonl` to `N` samples and writes `*_debug.jsonl` to avoid overwriting full results. In `inference` mode use `--biencoder_top_k 2 --crossencoder_top_k 2` or `tfidf`/`bm25` for fastest check. `src/encoders/bi_encoder/train/finetune.py` also supports `--debug --debug_limit 20 --batch_size 1 --max_length 512 --fp16 --gradient_checkpointing` (slices train/val/test to 20 samples, forces epoch=1; defaults `batch_size 4`, `max_length 4096`, `fp16/gradient_checkpointing false` sesuai repo asli untuk skripsi — pakai nilai kecil/hanya untuk debug VRAM 2GB).
+All `src/main.py` runs support `--debug --debug_limit N` (default 5). In `test-benchmark` mode it slices `data/datasets/LACD-biclassification/train-test-divide/test.jsonl` to `N` samples and writes `*_debug.jsonl` to avoid overwriting full results. In `inference` mode use `--biencoder_top_k 2 --crossencoder_top_k 2` or `tfidf`/`bm25` for the fastest check. `src/encoders/bi_encoder/train/finetune.py` also supports `--debug --debug_limit 20 --batch_size 1 --max_length 512 --fp16 --gradient_checkpointing` (slices train/val/test to 20 samples, forces epoch=1; defaults `batch_size 4`, `max_length 4096`, `fp16/gradient_checkpointing false` — use small values only for 2GB VRAM debugging).
 
 ```bash
 # Example: every README command has a debug counterpart
