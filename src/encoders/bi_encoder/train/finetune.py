@@ -41,6 +41,11 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true", help="enable debug mode: use limited samples and 1 epoch")
     parser.add_argument("--debug_limit", type=int, default=20, help="number of samples per split in debug mode")
 
+    # mini mode via argumen: stratified sampling, tidak perlu buat dataset baru
+    parser.add_argument("--mini_ratio", type=float, default=None, help="mini via argumen: fraction (0,1] untuk stratified sampling train/val/test, e.g. 0.15 = 15% data. Lebih representatif dari --debug head")
+    parser.add_argument("--mini_seed", type=int, default=42, help="seed untuk mini sampling (stratified)")
+    parser.add_argument("--mini_laws", type=int, default=None, help="mini laws: batasi jumlah pasal dari laws.csv (graph-aware, hub-preserving). None = full 79k")
+
     # batch size exposed (default 4 = original repo, backward compatible)
     parser.add_argument("--batch_size", type=int, default=4, help="per_device train/eval batch size (original: 4)")
 
@@ -73,6 +78,16 @@ if __name__ == "__main__":
     train_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl', lines=True)
     test_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl', lines=True)
     val_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl', lines=True)
+
+    # mini via argumen: stratified sampling (lebih representatif dari head)
+    if args.mini_ratio is not None:
+        from src.utils.utils import stratified_mini_sample
+        orig_train, orig_val, orig_test = len(train_df), len(val_df), len(test_df)
+        train_df = stratified_mini_sample(train_df, args.mini_ratio, seed=args.mini_seed, label_col="answer")
+        val_df = stratified_mini_sample(val_df, args.mini_ratio, seed=args.mini_seed, label_col="answer")
+        test_df = stratified_mini_sample(test_df, args.mini_ratio, seed=args.mini_seed, label_col="answer")
+        print(f"[MINI] ratio={args.mini_ratio} seed={args.mini_seed} -> train {orig_train}->{len(train_df)} val {orig_val}->{len(val_df)} test {orig_test}->{len(test_df)} (stratified)")
+        print(f"[MINI] train pos {train_df['answer'].sum()}/{len(train_df)} ({train_df['answer'].mean():.1%}), val {val_df['answer'].sum()}/{len(val_df)} ({val_df['answer'].mean():.1%})")
 
     if args.debug:
         print(f"[DEBUG] limiting datasets to {args.debug_limit} samples per split, epoch=1")

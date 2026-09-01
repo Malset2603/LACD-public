@@ -36,6 +36,11 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true", help="enable debug mode: run on limited samples")
     parser.add_argument("--debug_limit", type=int, default=5, help="number of samples to process in debug mode (only when --debug)")
 
+    # mini via argumen: stratified, tidak perlu buat dataset baru
+    parser.add_argument("--mini_ratio", type=float, default=None, help="mini via argumen: fraction (0,1] stratified sampling test.jsonl, e.g. 0.15. Lebih representatif dari --debug head")
+    parser.add_argument("--mini_seed", type=int, default=42, help="seed untuk mini sampling")
+    parser.add_argument("--mini_laws", type=int, default=None, help="mini laws: batasi jumlah pasal di LMGraph graph-aware")
+
     # crossencoder vector index 사용하는지도 필요함.
     # GNN method 적어야 함.
 
@@ -85,9 +90,11 @@ if __name__ == "__main__":
     from src.utils.utils import article_key_function
 
     # print("a"+article_key_function(article_to_check)+"a")
-    article_network = ArticleNetwork()
+    article_network = ArticleNetwork(mini_laws=args.mini_laws, mini_seed=args.mini_seed)
     edge_index_tensor = article_network.create_edge_index()
     edge_index_tensor = edge_index_tensor.to(device)
+    if args.mini_laws is not None:
+        print(f"[MINI] ArticleNetwork nodes {len(article_network.all_article_keys)} mini_laws={args.mini_laws} edges {edge_index_tensor.shape[1]//2}")
 
     # bi-encoder 혹은 cross-encoder 에서 caseaug method 가 있다면
     if args.biencoder_method == "caseaug" or args.crossencoder_method == "caseaug":
@@ -167,6 +174,12 @@ if __name__ == "__main__":
                 row = json.loads(line.strip())  # 각 줄을 JSON으로 파싱
                 rows.append(row)
 
+        if args.mini_ratio is not None:
+            from src.utils.utils import mini_rows_sample
+            orig = len(rows)
+            rows = mini_rows_sample(rows, args.mini_ratio, seed=args.mini_seed, label_key="answer")
+            print(f"[MINI] test.jsonl {orig}->{len(rows)} ratio={args.mini_ratio} pos {sum(1 for r in rows if r.get('answer'))}/{len(rows)} seed={args.mini_seed}")
+
         if args.debug:
             print(f"[DEBUG] limiting test-benchmark from {len(rows)} to {args.debug_limit} samples")
             rows = rows[:args.debug_limit]
@@ -230,6 +243,10 @@ if __name__ == "__main__":
 
         # result_list를 jsonl 파일로 저장
         suffix = "_debug" if args.debug else ""
+        if args.mini_ratio is not None:
+            suffix += f"_mini{int(args.mini_ratio*100)}"
+        if args.mini_laws is not None:
+            suffix += f"_laws{args.mini_laws}"
         with open("./outputs/retrieval_results/{0}_{1}_{2}{3}{4}.jsonl".format(args.biencoder_method,crossencoder_index_method ,args.crossencoder_method,"_noLM" if "noLM" in crossencoder_model_path else "", suffix), 'w', encoding='utf-8') as outfile:
             for result in result_list:
                 json.dump(result, outfile, ensure_ascii=False)

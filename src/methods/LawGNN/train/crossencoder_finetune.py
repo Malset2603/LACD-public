@@ -15,15 +15,23 @@ from src.utils.gnn.crossencoder_utils import GNNNLIDataset
 import os
 
 # Function to load data from jsonl
-def load_dataset(jsonl_file, article_network, tokenizer, method="baseline", case_multiplier=1):
+def load_dataset(jsonl_file, article_network, tokenizer, method="baseline", case_multiplier=1, mini_ratio=None, mini_seed=42):
     dataset = []
     key_error_cnt = 0
     # Ensure vector_tensor and edge_index_tensor are moved to CPU
+    # mini via argumen: load all lines then stratified sample sebelum encoding
+    all_lines = []
+    with open(jsonl_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            all_lines.append(json.loads(line))
+    if mini_ratio is not None and mini_ratio < 1.0:
+        from src.utils.utils import mini_rows_sample
+        orig = len(all_lines)
+        all_lines = mini_rows_sample(all_lines, mini_ratio, seed=mini_seed, label_key="answer")
+        print(f"[MINI] {jsonl_file} {orig}->{len(all_lines)} ratio={mini_ratio} pos {sum(1 for r in all_lines if r.get('answer'))}/{len(all_lines)}")
 
     for c_m in range(case_multiplier):
-        with open(jsonl_file, 'r', encoding='utf-8') as f:
-            for line in f:
-                data = json.loads(line)
+        for data in all_lines:
                 article1 = data['article1']
                 article2 = data['article2']
                 try:
@@ -87,6 +95,13 @@ if __name__ == "__main__":
     parser.add_argument("--case_multiplier", type=int, default=1)
     # parser.add_argument("--no_cross", type=bool, default=False)
 
+    parser.add_argument("--mini_ratio", type=float, default=None, help="mini via argumen: fraction (0,1] stratified sampling, e.g. 0.15")
+    parser.add_argument("--mini_seed", type=int, default=42, help="seed untuk mini sampling")
+    parser.add_argument("--mini_laws", type=int, default=None, help="mini laws: batasi jumlah pasal graph-aware")
+    parser.add_argument("--max_length", type=int, default=4096, help="max token length (default 4096, use 512 for mini VRAM)")
+    parser.add_argument("--fp16", action="store_true", help="enable fp16")
+    parser.add_argument("--gradient_checkpointing", action="store_true", help="enable gradient checkpointing")
+
     args = parser.parse_args()
 
     chroma_db_name = args.chroma_db_name
@@ -111,10 +126,20 @@ if __name__ == "__main__":
     client = PersistentClient(path="./data/database/chroma_db/" + chroma_db_name)
     chroma_collection = client.get_or_create_collection("quickstart")
 
-    # Article Network 만들기
-    article_network = ArticleNetwork()
+    # Article Network 만들기 (mini_laws support)
+    article_network = ArticleNetwork(mini_laws=args.mini_laws, mini_seed=args.mini_seed)
     edge_index_tensor = article_network.create_edge_index()
     edge_index_tensor = edge_index_tensor.to(device)
+    if args.mini_laws is not None:
+        print(f"[MINI] ArticleNetwork nodes {len(article_network.all_article_keys)} (mini_laws={args.mini_laws}) edges {edge_index_tensor.shape[1]//2} (bidirectional)")
+
+    # propagate max_length/fp16 to utils if provided via mini
+    if args.max_length != 4096:
+        from src.utils.encoder import utils as _enc_utils
+        _enc_utils.MAX_TOKEN_LENGTH = args.max_length
+        print(f"[MINI] MAX_TOKEN_LENGTH overridden -> {args.max_length}")
+    if args.gradient_checkpointing:
+        print(f"[MINI] gradient_checkpointing requested (GNN LM part only if supported)")
 
     # Load all contents from Chroma DB
     all_contents = chroma_collection.get(include=["embeddings", "documents"]) # type: ignore
@@ -175,11 +200,11 @@ if __name__ == "__main__":
     model.encoder.resize_token_embeddings(len(tokenizer))
 
 
-    # Load datasets
-    train_dataset = GNNNLIDataset(load_dataset('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl', article_network, tokenizer, method=case_augmentation_method, case_multiplier=case_multiplier))
+    # Load datasets (mini_ratio forwarded)
+    train_dataset = GNNNLIDataset(load_dataset('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl', article_network, tokenizer, method=case_augmentation_method, case_multiplier=case_multiplier, mini_ratio=args.mini_ratio, mini_seed=args.mini_seed))
     # we do not need to multiply cases for val, test datasets
-    val_dataset = GNNNLIDataset(load_dataset('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl', article_network, tokenizer, method=case_augmentation_method))
-    test_dataset = GNNNLIDataset(load_dataset('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl', article_network, tokenizer, method=case_augmentation_method))
+    val_dataset = GNNNLIDataset(load_dataset('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl', article_network, tokenizer, method=case_augmentation_method, mini_ratio=args.mini_ratio, mini_seed=args.mini_seed))
+    test_dataset = GNNNLIDataset(load_dataset('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl', article_network, tokenizer, method=case_augmentation_method, mini_ratio=args.mini_ratio, mini_seed=args.mini_seed))
 
     training_args = TrainingArguments(
         output_dir=f'./outputs/LACD-cross/gnns/{args.tag}',  # output directory
