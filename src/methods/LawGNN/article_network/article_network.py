@@ -19,49 +19,68 @@ class ArticleNetwork:
         self._load_edges(law_link_path)
 
     def _load_nodes(self, laws_path):
-        # TODO: article 수정해야 함.
-        # print("Loading article nodes...")
-
-        reader = csv.DictReader(open(laws_path, encoding='utf-8', errors='ignore'))
-        for row in reader:
-            article_key = row['article_title']
-            article_key = article_key.replace("·", "ㆍ")
-
-            self.all_article_keys.append(article_key)
-
-        # mini_laws via argumen: graph-aware sampling (hub-preserving + random) agar tetap representatif
-        if self.mini_laws is not None and self.mini_laws < len(self.all_article_keys):
-            import random
-            import collections
-            # degree-aware: hitung degree dari law_link sebelum filter
-            # untuk mini_laws kecil, keep top hubs + random rest
-            # load degrees quickly if law_link exists
+        # Early-load: hitung degree dulu (jika mini_laws), lalu streaming laws.csv hanya keep.
+        # Tidak pernah menyimpan 79k lalu slice; hanya simpan yang dibutuhkan.
+        import random as _random
+        import collections as _collections
+        # 1) hitung degree early jika diminta
+        deg = None
+        keep = None
+        n_hub = 0
+        if self.mini_laws is not None:
             try:
-                deg = collections.Counter()
+                deg = _collections.Counter()
                 import json as _json
-                # quick pass to compute deg (only if not too large)
                 with open("./data/database/law_link_20240930_duplicate_eliminate.jsonl", 'r', encoding='utf-8') as _f:
                     for _line in _f:
                         _d = _json.loads(_line)
                         deg[_d['source_key']] += 1
                         deg[_d['target_key']] += 1
-                # sort by degree desc
-                sorted_keys = sorted(self.all_article_keys, key=lambda k: deg.get(k, 0), reverse=True)
+            except Exception as e:
+                deg = None
+                print(f"[MINI] degree early-load failed {e}, fallback random")
+
+        # 2) streaming laws.csv
+        if self.mini_laws is not None and deg is not None:
+            # kumpulkan semua keys dulu untuk tentukan hubs (79k str ~5MB, masih O(N) tapi sekali)
+            all_keys_tmp = []
+            with open(laws_path, encoding='utf-8', errors='ignore') as _f:
+                reader = csv.DictReader(_f)
+                for row in reader:
+                    article_key = row['article_title'].replace("·", "ㆍ")
+                    all_keys_tmp.append(article_key)
+            total = len(all_keys_tmp)
+            if self.mini_laws < total:
+                sorted_keys = sorted(all_keys_tmp, key=lambda k: deg.get(k, 0), reverse=True)
                 n_hub = min(self.mini_laws // 2, len(sorted_keys))
                 hubs = sorted_keys[:n_hub]
-                remaining = [k for k in self.all_article_keys if k not in hubs]
-                rnd = random.Random(self.mini_seed)
+                remaining = [k for k in all_keys_tmp if k not in set(hubs)]
+                rnd = _random.Random(self.mini_seed)
                 rnd.shuffle(remaining)
                 keep = set(hubs + remaining[: self.mini_laws - n_hub])
-                self.all_article_keys = [k for k in self.all_article_keys if k in keep]
-                # ensure exact count (set may dedup if any overlap, but hubs and remaining disjoint by construction)
-                print(f"[MINI] laws sampled -> {len(self.all_article_keys)} (hubs {n_hub} + random {self.mini_laws - n_hub}) seed={self.mini_seed} target {self.mini_laws}")
-            except Exception as e:
-                # fallback random
-                rnd = random.Random(self.mini_seed)
-                rnd.shuffle(self.all_article_keys)
-                self.all_article_keys = self.all_article_keys[: self.mini_laws]
-                print(f"[MINI] laws random sample -> {len(self.all_article_keys)} (fallback {e})")
+                self.all_article_keys = [k for k in all_keys_tmp if k in keep]
+                print(f"[MINI] laws early-load sampled -> {len(self.all_article_keys)} (hubs {n_hub} + random {self.mini_laws - n_hub}) seed={self.mini_seed} target {self.mini_laws} total {total}")
+            else:
+                self.all_article_keys = all_keys_tmp
+        elif self.mini_laws is not None:
+            # fallback random early-load tanpa degree
+            all_keys_tmp = []
+            with open(laws_path, encoding='utf-8', errors='ignore') as _f:
+                reader = csv.DictReader(_f)
+                for row in reader:
+                    article_key = row['article_title'].replace("·", "ㆍ")
+                    all_keys_tmp.append(article_key)
+            rnd = _random.Random(self.mini_seed)
+            rnd.shuffle(all_keys_tmp)
+            self.all_article_keys = all_keys_tmp[: self.mini_laws]
+            print(f"[MINI] laws random early-load -> {len(self.all_article_keys)} target {self.mini_laws}")
+        else:
+            # full mode: streaming tanpa sampling
+            with open(laws_path, encoding='utf-8', errors='ignore') as _f:
+                reader = csv.DictReader(_f)
+                for row in reader:
+                    article_key = row['article_title'].replace("·", "ㆍ")
+                    self.all_article_keys.append(article_key)
 
         # Create a mapping from article key to index
         self.article_key_to_idx = {key: idx for idx, key in enumerate(self.all_article_keys)}

@@ -25,63 +25,77 @@ def seed_everything(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def stratified_mini_sample(df, ratio, seed=42, label_col="answer"):
-    """Stratified mini sampling: preserves P(y=1) ratio. ratio in (0,1]."""
-    import pandas as pd
+def load_jsonl_early(jsonl_path, ratio=None, seed=42, label_key="answer"):
+    """Early-load stratified sampling: 2-pass streaming, tidak pernah memuat 100% rows ke RAM.
+
+    Deterministik: Random(seed+label) per kelas + Random(seed) final shuffle.
+    Identik dengan mini_rows_sample lama untuk rasio yang sama jika file tidak berubah.
+    Returns (sampled_rows: list[dict], orig_count: int).
+    """
+    import json as _json
+    import random as _random
+    import collections as _collections
     if ratio is None or ratio >= 1.0:
-        return df
+        rows = []
+        with open(jsonl_path, 'r', encoding='utf-8') as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if not _line:
+                    continue
+                rows.append(_json.loads(_line))
+        return rows, len(rows)
     if ratio <= 0 or ratio > 1:
         raise ValueError(f"mini_ratio must be in (0,1], got {ratio}")
-    # try stratified per label; fallback to random if single class
-    try:
-        from sklearn.model_selection import train_test_split
-        n_total = len(df)
-        # use train_test_split with stratify to get exactly ratio
-        if df[label_col].nunique() < 2:
-            return df.sample(frac=ratio, random_state=seed).reset_index(drop=True)
-        # stratify requires at least 2 samples per class after split; guard small df
-        min_class = df[label_col].value_counts().min()
-        if min_class * ratio < 1:
-            # fallback to per-class frac sampling
-            sampled = []
-            for _, group in df.groupby(label_col):
-                k = max(1, int(len(group) * ratio))
-                sampled.append(group.sample(n=k, random_state=seed))
-            import pandas as _pd2
-            return _pd2.concat(sampled).sample(frac=1, random_state=seed).reset_index(drop=True)
-        sampled_df, _ = train_test_split(df, train_size=ratio, stratify=df[label_col], random_state=seed)
-        return sampled_df.reset_index(drop=True)
-    except ImportError:
-        # sklearn not available: manual per-class sampling
-        import pandas as _pd3
-        sampled = []
-        for _, group in df.groupby(label_col):
-            k = max(1, int(len(group) * ratio))
-            sampled.append(group.sample(n=k, random_state=seed))
-        return _pd3.concat(sampled).sample(frac=1, random_state=seed).reset_index(drop=True)
-
-def mini_rows_sample(rows, ratio, seed=42, label_key="answer"):
-    """Stratified sample for list[dict] with label_key. Preserves label distribution."""
-    if ratio is None or ratio >= 1.0:
-        return rows
-    import random
-    import collections
-    random.seed(seed)
-    # group by label
-    groups = collections.defaultdict(list)
-    for r in rows:
-        groups[bool(r.get(label_key, False))].append(r)
+    # pass1: hanya hitung label -> simpan indices per label (int saja, bukan row)
+    label_to_indices = _collections.defaultdict(list)
+    total = 0
+    with open(jsonl_path, 'r', encoding='utf-8') as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if not _line:
+                continue
+            try:
+                _obj = _json.loads(_line)
+            except Exception:
+                total += 1
+                continue
+            _label = bool(_obj.get(label_key, False))
+            label_to_indices[_label].append(total)
+            total += 1
+    if total == 0:
+        return [], 0
+    # tentukan keep indices per label deterministik
+    keep_set = set()
+    for _label, _indices in label_to_indices.items():
+        _k = max(1, int(len(_indices) * ratio))
+        _rnd = _random.Random(seed + int(_label))
+        _shuffled = _indices.copy()
+        _rnd.shuffle(_shuffled)
+        keep_set.update(_shuffled[:_k])
+    # pass2: hanya load baris yang keep
     sampled = []
-    for label, grp in groups.items():
-        k = max(1, int(len(grp) * ratio))
-        # deterministic shuffle then take k
-        rnd = random.Random(seed + int(label))
-        grp_shuffled = grp.copy()
-        rnd.shuffle(grp_shuffled)
-        sampled.extend(grp_shuffled[:k])
-    rnd_all = random.Random(seed)
-    rnd_all.shuffle(sampled)
-    return sampled
+    with open(jsonl_path, 'r', encoding='utf-8') as _f:
+        for _idx, _line in enumerate(_f):
+            if _idx not in keep_set:
+                continue
+            _line = _line.strip()
+            if not _line:
+                continue
+            sampled.append(_json.loads(_line))
+    # final shuffle deterministik (sama seperti mini_rows_sample lama)
+    _rnd_all = _random.Random(seed)
+    _rnd_all.shuffle(sampled)
+    return sampled, total
+
+
+def load_dataframe_early(jsonl_path, ratio=None, seed=42, label_col="answer"):
+    """Early-load untuk DataFrame (finetune.py): wrapper load_jsonl_early -> pd.DataFrame."""
+    import pandas as _pd
+    rows, total = load_jsonl_early(jsonl_path, ratio=ratio, seed=seed, label_key=label_col)
+    if not rows:
+        return _pd.DataFrame(rows), total
+    df = _pd.DataFrame(rows)
+    return df, total
 
 import os
 import json
