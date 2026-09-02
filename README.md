@@ -153,13 +153,13 @@ python ./src/methods/LawGNN/train/crossencoder_finetune.py --tag kbb-baseline-gr
 
 ### Mini mode via arguments (fast yet representative — for thesis experiments)
 
-> A **stratified**, **graph-aware** alternative to `--debug`. No need to create a new dataset, simply add arguments. The original files are loaded in full and then sliced in-memory.
+> A **stratified**, **graph-aware** alternative to `--debug`. No need to create a new dataset, simply add arguments. Early-load 2-pass streaming (tidak memuat 100% ke RAM), deterministik via `--mini_seed` — `pass1` hanya hitung `label/degree` (`indices`/`Counter`), `pass2` hanya load `keep` (`Random(seed+label)` per kelas + `Random(seed)` final shuffle).
 
 | Argument | Default | Effect |
 |----------|---------|--------|
-| `--mini_ratio 0.15` | `None` (full) | Stratified fraction `(0,1]` for `train/val/test.jsonl` preserving `P(y=1)=12.8%`. E.g., `0.15` = `1399->209`, `469->70`. Statistically representative, unlike `--debug` `head(N)`. |
-| `--mini_laws 2000` | `None` (79k) | Limits `LMGraph` `ArticleNetwork` with hub-preserving sampling: `50%` top-degree + `50%` random. `2000` nodes `~7.9k` edges vs `79k/339k` full. Chroma build `~4 min` vs `~60 min`. |
-| `--mini_seed 42` | `42` | Reproducible seed for both sampling operations above. |
+| `--mini_ratio 0.15` | `None` (full) | Early-load stratified fraction `(0,1]` for `train/val/test.jsonl` preserving `P(y=1)=12.8%` via `src/utils/utils.py:28`. E.g., `0.15` = `1399->209`, `469->70`. Statistically representative, unlike `--debug` `head(N)`. Deterministik antar sesi. |
+| `--mini_laws 2000` | `None` (79k) | Early-load `LMGraph` `ArticleNetwork` `src/methods/LawGNN/article_network/article_network.py:21` — degree dihitung dulu dari `law_link`, lalu streaming `laws.csv` hanya `keep` hub-preserving `50%` top-degree + `50%` random. `2000` nodes `~7.9k` edges vs `79k/339k` full. Chroma build `~4 min` vs `~60 min`. |
+| `--mini_seed 42` | `42` | Reproducible seed untuk kedua sampling di atas (`seed+label` per kelas). |
 
 Mini outputs are automatically suffixed `_mini15_laws2000` to avoid overwriting full results, e.g., `*_mini15_laws2000.jsonl`.
 
