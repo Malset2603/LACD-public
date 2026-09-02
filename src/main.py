@@ -167,18 +167,17 @@ if __name__ == "__main__":
         # 결과를 저장할 리스트
         result_list = []
 
-        # 기존의 rows 읽기 작업
-        rows = []
-        with open("./data/datasets/LACD-biclassification/train-test-divide/test.jsonl", 'r', encoding='utf-8') as file:
-            for line in file:
-                row = json.loads(line.strip())  # 각 줄을 JSON으로 파싱
-                rows.append(row)
-
+        # early-load: tidak memuat 100% rows lalu slice
         if args.mini_ratio is not None:
-            from src.utils.utils import mini_rows_sample
-            orig = len(rows)
-            rows = mini_rows_sample(rows, args.mini_ratio, seed=args.mini_seed, label_key="answer")
-            print(f"[MINI] test.jsonl {orig}->{len(rows)} ratio={args.mini_ratio} pos {sum(1 for r in rows if r.get('answer'))}/{len(rows)} seed={args.mini_seed}")
+            from src.utils.utils import load_jsonl_early
+            rows, orig = load_jsonl_early("./data/datasets/LACD-biclassification/train-test-divide/test.jsonl", ratio=args.mini_ratio, seed=args.mini_seed, label_key="answer")
+            print(f"[MINI] early-load test.jsonl {orig}->{len(rows)} ratio={args.mini_ratio} pos {sum(1 for r in rows if r.get('answer'))}/{len(rows)} seed={args.mini_seed}")
+        else:
+            rows = []
+            with open("./data/datasets/LACD-biclassification/train-test-divide/test.jsonl", 'r', encoding='utf-8') as file:
+                for line in file:
+                    row = json.loads(line.strip())
+                    rows.append(row)
 
         if args.debug:
             print(f"[DEBUG] limiting test-benchmark from {len(rows)} to {args.debug_limit} samples")

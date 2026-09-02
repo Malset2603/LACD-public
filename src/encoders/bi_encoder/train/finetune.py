@@ -75,19 +75,18 @@ if __name__ == "__main__":
         from src.methods.case_augmentation.prompt import case_cache_start, case_cache_end
         case_cache_start()
 
-    train_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl', lines=True)
-    test_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl', lines=True)
-    val_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl', lines=True)
-
-    # mini via argumen: stratified sampling (lebih representatif dari head)
+    # early-load: sampling terjadi saat baca file, tidak memuat 100% lalu slice
     if args.mini_ratio is not None:
-        from src.utils.utils import stratified_mini_sample
-        orig_train, orig_val, orig_test = len(train_df), len(val_df), len(test_df)
-        train_df = stratified_mini_sample(train_df, args.mini_ratio, seed=args.mini_seed, label_col="answer")
-        val_df = stratified_mini_sample(val_df, args.mini_ratio, seed=args.mini_seed, label_col="answer")
-        test_df = stratified_mini_sample(test_df, args.mini_ratio, seed=args.mini_seed, label_col="answer")
-        print(f"[MINI] ratio={args.mini_ratio} seed={args.mini_seed} -> train {orig_train}->{len(train_df)} val {orig_val}->{len(val_df)} test {orig_test}->{len(test_df)} (stratified)")
+        from src.utils.utils import load_dataframe_early
+        train_df, orig_train = load_dataframe_early('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl', ratio=args.mini_ratio, seed=args.mini_seed, label_col="answer")
+        val_df, orig_val = load_dataframe_early('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl', ratio=args.mini_ratio, seed=args.mini_seed, label_col="answer")
+        test_df, orig_test = load_dataframe_early('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl', ratio=args.mini_ratio, seed=args.mini_seed, label_col="answer")
+        print(f"[MINI] early-load ratio={args.mini_ratio} seed={args.mini_seed} -> train {orig_train}->{len(train_df)} val {orig_val}->{len(val_df)} test {orig_test}->{len(test_df)} (stratified)")
         print(f"[MINI] train pos {train_df['answer'].sum()}/{len(train_df)} ({train_df['answer'].mean():.1%}), val {val_df['answer'].sum()}/{len(val_df)} ({val_df['answer'].mean():.1%})")
+    else:
+        train_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl', lines=True)
+        test_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl', lines=True)
+        val_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl', lines=True)
 
     if args.debug:
         print(f"[DEBUG] limiting datasets to {args.debug_limit} samples per split, epoch=1")

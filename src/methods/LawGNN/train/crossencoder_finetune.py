@@ -14,21 +14,20 @@ from src.utils.encoder.utils import compute_metrics, MAX_TOKEN_LENGTH , TensorBo
 from src.utils.gnn.crossencoder_utils import GNNNLIDataset
 import os
 
-# Function to load data from jsonl
+# Function to load data from jsonl — early-load
 def load_dataset(jsonl_file, article_network, tokenizer, method="baseline", case_multiplier=1, mini_ratio=None, mini_seed=42):
     dataset = []
     key_error_cnt = 0
-    # Ensure vector_tensor and edge_index_tensor are moved to CPU
-    # mini via argumen: load all lines then stratified sample sebelum encoding
-    all_lines = []
-    with open(jsonl_file, 'r', encoding='utf-8') as f:
-        for line in f:
-            all_lines.append(json.loads(line))
+    # early-load: sampling saat baca file, tidak load 100% lalu slice
     if mini_ratio is not None and mini_ratio < 1.0:
-        from src.utils.utils import mini_rows_sample
-        orig = len(all_lines)
-        all_lines = mini_rows_sample(all_lines, mini_ratio, seed=mini_seed, label_key="answer")
-        print(f"[MINI] {jsonl_file} {orig}->{len(all_lines)} ratio={mini_ratio} pos {sum(1 for r in all_lines if r.get('answer'))}/{len(all_lines)}")
+        from src.utils.utils import load_jsonl_early
+        all_lines, orig = load_jsonl_early(jsonl_file, ratio=mini_ratio, seed=mini_seed, label_key="answer")
+        print(f"[MINI] early-load {jsonl_file} {orig}->{len(all_lines)} ratio={mini_ratio} pos {sum(1 for r in all_lines if r.get('answer'))}/{len(all_lines)}")
+    else:
+        all_lines = []
+        with open(jsonl_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                all_lines.append(json.loads(line))
 
     for c_m in range(case_multiplier):
         for data in all_lines:
