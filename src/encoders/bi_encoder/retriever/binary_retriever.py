@@ -142,7 +142,7 @@ def find_top_contradictions_with_cosine(article, model, tokenizer, chroma_collec
     return pooled_output, top_k_articles
 
 
-def binary_retriever(model_path, laws_csv_path, chroma_db_name, article_to_check, classification_method="cosine", top_k=500, case_augmentation_method = "baseline", batch_size = 8):
+def binary_retriever(model_path, laws_csv_path, chroma_db_name, article_to_check, classification_method="cosine", top_k=500, case_augmentation_method = "baseline", batch_size = 8, allowed_keys=None, article_network=None):
     """
     Bi-encoder retriever function to find contradictions in legal texts.
 
@@ -164,6 +164,15 @@ def binary_retriever(model_path, laws_csv_path, chroma_db_name, article_to_check
 
     laws_csv = laws_csv_path
     laws_df = pd.read_csv(laws_csv)
+
+    # early-load: filter laws_df by ArticleNetwork keep set if provided (mini_laws)
+    if article_network is not None and hasattr(article_network, 'all_article_keys'):
+        allowed_keys = set(article_network.all_article_keys)
+    if allowed_keys is not None:
+        # laws.csv article_title is the key (normalize · -> ㆍ)
+        before = len(laws_df)
+        laws_df = laws_df[laws_df['article_title'].apply(lambda x: str(x).replace("·", "ㆍ") in allowed_keys)]
+        print(f"[MINI] Chroma filter {before}->{len(laws_df)} rows by allowed_keys ({len(allowed_keys)} keep)")
 
     from src.utils.encoder.biencoder_utils import load_chromaDB_byname
     chroma_collection = load_chromaDB_byname(chroma_db_name)

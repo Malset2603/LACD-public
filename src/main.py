@@ -107,7 +107,7 @@ if __name__ == "__main__":
 
     if args.mode =="inference":
         if args.retrieval_method == "bi-only":
-            article_vector, top_contradictions = binary_retriever(biencoder_model_path, laws_csv_path, chroma_db_name, article_to_check, classification_method, biencoder_top_k, case_augmentation_method=args.biencoder_method)
+            article_vector, top_contradictions = binary_retriever(biencoder_model_path, laws_csv_path, chroma_db_name, article_to_check, classification_method, biencoder_top_k, case_augmentation_method=args.biencoder_method, article_network=article_network)
             top_contradictions = [t.split("\n[CASE]\n")[0] for t in top_contradictions]
 
         elif args.retrieval_method == "cross-only":
@@ -128,7 +128,7 @@ if __name__ == "__main__":
             )
 
         elif args.retrieval_method == "hybrid":
-            article_vector, top_contradictions = binary_retriever(biencoder_model_path, laws_csv_path, chroma_db_name, article_to_check, classification_method, top_k=biencoder_top_k, case_augmentation_method=args.biencoder_method)
+            article_vector, top_contradictions = binary_retriever(biencoder_model_path, laws_csv_path, chroma_db_name, article_to_check, classification_method, top_k=biencoder_top_k, case_augmentation_method=args.biencoder_method, article_network=article_network)
 
             top_contradictions = cross_retriever(article_to_check, 
             top_contradictions, 
@@ -193,7 +193,7 @@ if __name__ == "__main__":
             article_to_check = article1
 
             if args.retrieval_method == "bi-only":
-                article_vector, top_contradictions = binary_retriever(biencoder_model_path, laws_csv_path, chroma_db_name, article_to_check, classification_method, biencoder_top_k, case_augmentation_method=args.biencoder_method)
+                article_vector, top_contradictions = binary_retriever(biencoder_model_path, laws_csv_path, chroma_db_name, article_to_check, classification_method, biencoder_top_k, case_augmentation_method=args.biencoder_method, article_network=article_network)
                 top_contradictions = [t.split("\n[CASE]\n")[0] for t in top_contradictions]
 
             elif args.retrieval_method == "cross-only":
@@ -212,7 +212,7 @@ if __name__ == "__main__":
                 )
 
             elif args.retrieval_method == "hybrid":
-                article_vector, top_contradictions = binary_retriever(biencoder_model_path, laws_csv_path, chroma_db_name, article_to_check, classification_method, top_k=biencoder_top_k, case_augmentation_method=args.biencoder_method)
+                article_vector, top_contradictions = binary_retriever(biencoder_model_path, laws_csv_path, chroma_db_name, article_to_check, classification_method, top_k=biencoder_top_k, case_augmentation_method=args.biencoder_method, article_network=article_network)
 
                 top_contradictions = cross_retriever(article_to_check, 
                     top_contradictions, 
