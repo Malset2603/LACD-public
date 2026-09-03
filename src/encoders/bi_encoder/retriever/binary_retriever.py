@@ -158,7 +158,7 @@ def binary_retriever(model_path, laws_csv_path, chroma_db_name, article_to_check
     List of top-k articles that contradict the input article.
     """
 
-    model = torch.load(model_path + "/model.pth")
+    model = torch.load(model_path + "/model.pth", weights_only=False)
     model.eval()  # 모델을 평가 모드로 설정
     tokenizer = AutoTokenizer.from_pretrained(model_path)
 

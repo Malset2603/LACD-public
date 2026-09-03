@@ -28,7 +28,7 @@ def cross_retriever(article, top_k_articles, model_path, article_network:Article
     # Load tokenizer and cross-encoder model
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
-    cross_encoder_model = torch.load(model_path + "/model.pth")
+    cross_encoder_model = torch.load(model_path + "/model.pth", weights_only=False)
     cross_encoder_model.eval()
 
     if article_key_function(article) not in article_network.article_key_to_idx.keys():
@@ -148,7 +148,7 @@ def noLM_cross_retriever(article, top_k_articles, model_path, article_network:Ar
     """
     # Load tokenizer and cross-encoder model
 
-    cross_encoder_model = torch.load(model_path + "/model.pth")
+    cross_encoder_model = torch.load(model_path + "/model.pth", weights_only=False)
     cross_encoder_model.eval()
 
     if article_key_function(article) not in article_network.article_key_to_idx.keys():
