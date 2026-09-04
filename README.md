@@ -151,47 +151,47 @@ python ./src/methods/LawGNN/train/crossencoder_finetune.py --tag kbb-baseline-gc
 python ./src/methods/LawGNN/train/crossencoder_finetune.py --tag kbb-baseline-graphsage-caseaugembds --gnn_method graphsage --chroma_db_name kbb-caseaug --case_augmentation_method baseline --epoch 3
 ```
 
-### Mini mode via arguments (fast yet representative — for thesis experiments)
+### Subset sampling via arguments (fast yet representative — for thesis experiments)
 
-> A **stratified**, **graph-aware** alternative to `--debug`. No need to create a new dataset, simply add arguments. Early-load 2-pass streaming (tidak memuat 100% ke RAM), deterministik via `--mini_seed` — `pass1` hanya hitung `label/degree` (`indices`/`Counter`), `pass2` hanya load `keep` (`Random(seed+label)` per kelas + `Random(seed)` final shuffle).
+> A **stratified**, **graph-aware** alternative to `--debug`. No need to create a new dataset, simply add arguments. Early-load 2-pass streaming (never loads 100% into RAM), deterministic via `--subset_seed` — `pass1` only counts `label/degree` (`indices`/`Counter`), `pass2` only loads `keep` (`Random(seed+label)` per class + `Random(seed)` final shuffle).
 
 | Argument | Default | Effect |
 |----------|---------|--------|
-| `--mini_ratio 0.15` | `None` (full) | Early-load stratified fraction `(0,1]` for `train/val/test.jsonl` preserving `P(y=1)=12.8%` via `src/utils/utils.py:28`. E.g., `0.15` = `1399->209`, `469->70`. Statistically representative, unlike `--debug` `head(N)`. Deterministik antar sesi. |
-| `--mini_laws 2000` | `None` (79k) | Early-load `LMGraph` `ArticleNetwork` `src/methods/LawGNN/article_network/article_network.py:21` — degree dihitung dulu dari `law_link`, lalu streaming `laws.csv` hanya `keep` hub-preserving `50%` top-degree + `50%` random. `2000` nodes `~7.9k` edges vs `79k/339k` full. Chroma build `~4 min` vs `~60 min`. |
-| `--mini_seed 42` | `42` | Reproducible seed untuk kedua sampling di atas (`seed+label` per kelas). |
+| `--subset_ratio 0.15` | `None` (full) | Early-load stratified fraction `(0,1]` for `train/val/test.jsonl` preserving `P(y=1)=12.8%` via `src/utils/utils.py:28`. E.g., `0.15` = `1399->209`, `469->70`. Statistically representative, unlike `--debug` `head(N)`. Deterministic across sessions. Alias: `--sample_ratio`, `--mini_ratio` (deprecated). |
+| `--subset_laws 2000` | `None` (79k) | Early-load `LMGraph` `ArticleNetwork` `src/methods/LawGNN/article_network/article_network.py:21` — degree is computed first from `law_link`, then `laws.csv` is streamed keeping only `keep` with hub-preserving `50%` top-degree + `50%` random. `2000` nodes `~7.9k` edges vs `79k/339k` full. Chroma build `~4 min` vs `~60 min`. Alias: `--mini_laws`, `--law_nodes` (deprecated). |
+| `--subset_seed 42` | `42` | Reproducible seed for both samplings above (`seed+label` per class). Alias: `--mini_seed` (deprecated). |
 
-Mini outputs are automatically suffixed `_mini15_laws2000` to avoid overwriting full results, e.g., `*_mini15_laws2000.jsonl`.
+Subset outputs are automatically suffixed `_subset15_laws2000` to avoid overwriting full results, e.g., `*_subset15_laws2000.jsonl` (legacy `_mini*` still readable via alias).
 
 **When to use which:**
 * `debug` (`head`): bug smoke test, `<10s`, metrics **not** representative.
-* `mini` (`stratified`): hyperparameter tuning (`tau/alpha/epoch`), GNN ablations, `Spearman Recall@50 >0.85` vs full, `~10x` faster.
+* `subset` (`stratified`): hyperparameter tuning (`tau/alpha/epoch`), GNN ablations, `Spearman Recall@50 >0.85` vs full, `~10x` faster.
 
 ```bash
-# Bi-encoder training — mini 15% + 2k articles, 512 tokens, fp16 (4 min on 2GB GPU) — recommended default for thesis
-python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-mini15 --mini_ratio 0.15 --mini_laws 2000 --max_length 512 --fp16 --batch_size 4 --epoch 3
+# Bi-encoder training — subset 15% + 2k articles, 512 tokens, fp16 (4 min on 2GB GPU) — recommended default for thesis
+python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-mini15 --subset_ratio 0.15 --subset_laws 2000 --max_length 512 --fp16 --batch_size 4 --epoch 3
 
-# Bi-encoder training — mini 10% for rapid sweeps
-python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-mini10 --mini_ratio 0.1 --mini_laws 2000 --max_length 512 --fp16 --batch_size 4 --epoch 1
+# Bi-encoder training — subset 10% for rapid sweeps
+python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-mini10 --subset_ratio 0.1 --subset_laws 2000 --max_length 512 --fp16 --batch_size 4 --epoch 1
 
-# Build Chroma DB mini (2k articles only) — must use the same mini_laws as training to keep the graph consistent
-python ./src/main.py --biencoder_model_path ./data/models/LACD-bi/kbb-mini15 --chroma_db_name kbb-mini --biencoder_method baseline --retrieval_method bi-only --mini_laws 2000
+# Build Chroma DB subset (2k articles only) — must use the same subset_laws as training to keep the graph consistent
+python ./src/main.py --biencoder_model_path ./data/models/LACD-bi/kbb-mini15 --chroma_db_name kbb-mini --biencoder_method baseline --retrieval_method bi-only --subset_laws 2000
 
-# Cross-encoder GNN training — mini 10%
-python ./src/methods/LawGNN/train/crossencoder_finetune.py --tag kbb-gat-mini10 --gnn_method gat --chroma_db_name kbb-mini --case_augmentation_method baseline --epoch 3 --mini_ratio 0.1 --mini_laws 2000 --max_length 512 --fp16
+# Cross-encoder GNN training — subset 10%
+python ./src/methods/LawGNN/train/crossencoder_finetune.py --tag kbb-gat-mini10 --gnn_method gat --chroma_db_name kbb-mini --case_augmentation_method baseline --epoch 3 --subset_ratio 0.1 --subset_laws 2000 --max_length 512 --fp16
 
-# Benchmark — mini 20% (93 samples instead of 469) — 5x faster, still stratified
-python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/gnns/kbb-gat-mini10 --biencoder_model_path ./data/models/LACD-bi/kbb-mini15 --chroma_db_name kbb-mini --retrieval_method hybrid --crossencoder_index_method gat --crossencoder_method baseline --biencoder_method baseline --mode test-benchmark --mini_ratio 0.2 --mini_laws 2000
-# output -> outputs/retrieval_results/*_mini20_laws2000.jsonl
+# Benchmark — subset 20% (93 samples instead of 469) — 5x faster, still stratified
+python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/gnns/kbb-gat-mini10 --biencoder_model_path ./data/models/LACD-bi/kbb-mini15 --chroma_db_name kbb-mini --retrieval_method hybrid --crossencoder_index_method gat --crossencoder_method baseline --biencoder_method baseline --mode test-benchmark --subset_ratio 0.2 --subset_laws 2000
+# output -> outputs/retrieval_results/*_subset20_laws2000.jsonl
 
-# Classical retriever mini (no GPU, <10s)
-python ./src/main.py --chroma_db_name kbb-mini --retrieval_method tfidf --mini_laws 2000 --mini_ratio 0.2 --mode test-benchmark
+# Classical retriever subset (no GPU, <10s)
+python ./src/main.py --chroma_db_name kbb-mini --retrieval_method tfidf --subset_laws 2000 --subset_ratio 0.2 --mode test-benchmark
 
-# Combine mini + debug for ultra-fast smoke test (5 samples drawn from the 15% stratified mini)
-python ./src/main.py --chroma_db_name kbb-mini --retrieval_method hybrid --mini_ratio 0.15 --mini_laws 2000 --mode test-benchmark --debug --debug_limit 5 --biencoder_top_k 2 --crossencoder_top_k 2
+# Combine subset + debug for ultra-fast smoke test (5 samples drawn from the 15% stratified subset)
+python ./src/main.py --chroma_db_name kbb-mini --retrieval_method hybrid --subset_ratio 0.15 --subset_laws 2000 --mode test-benchmark --debug --debug_limit 5 --biencoder_top_k 2 --crossencoder_top_k 2
 ```
 
-> Tip: `mini` and `debug` can be combined. `mini_ratio` is applied first (stratified `209`), then `debug` takes `head(5)` from that subset.
+> Tip: `subset` and `debug` can be combined. `subset_ratio` is applied first (stratified `209`), then `debug` takes `head(5)` from that subset. `mini_*` aliases remain functional but deprecated.
 
 ### Debug mode
 
