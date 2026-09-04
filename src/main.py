@@ -36,15 +36,19 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true", help="enable debug mode: run on limited samples")
     parser.add_argument("--debug_limit", type=int, default=5, help="number of samples to process in debug mode (only when --debug)")
 
-    # mini via argumen: stratified, tidak perlu buat dataset baru
-    parser.add_argument("--mini_ratio", type=float, default=None, help="mini via argumen: fraction (0,1] stratified sampling test.jsonl, e.g. 0.15. Lebih representatif dari --debug head")
-    parser.add_argument("--mini_seed", type=int, default=42, help="seed untuk mini sampling")
-    parser.add_argument("--mini_laws", type=int, default=None, help="mini laws: batasi jumlah pasal di LMGraph graph-aware")
+    # subset sampling: stratified, no need to create a new dataset (alias mini_* deprecated)
+    parser.add_argument("--subset_ratio", "--sample_ratio", "--mini_ratio", type=float, default=None, dest="subset_ratio", help="subset sampling: fraction (0,1] stratified sampling for test.jsonl, e.g. 0.15. More representative than --debug head (alias --mini_ratio deprecated)")
+    parser.add_argument("--subset_seed", "--sample_seed", "--mini_seed", type=int, default=42, dest="subset_seed", help="seed for subset sampling (alias --mini_seed deprecated)")
+    parser.add_argument("--subset_laws", "--mini_laws", "--law_nodes", type=int, default=None, dest="subset_laws", help="subset laws: limit number of articles in LMGraph (graph-aware) (alias --mini_laws deprecated)")
 
     # crossencoder vector index 사용하는지도 필요함.
     # GNN method 적어야 함.
 
     args = parser.parse_args()
+    # backward compat aliases (deprecated mini_*)
+    args.mini_ratio = args.subset_ratio
+    args.mini_laws = args.subset_laws
+    args.mini_seed = args.subset_seed
 
     # 사용 예시
     biencoder_model_path = args.biencoder_model_path
@@ -90,11 +94,11 @@ if __name__ == "__main__":
     from src.utils.utils import article_key_function
 
     # print("a"+article_key_function(article_to_check)+"a")
-    article_network = ArticleNetwork(mini_laws=args.mini_laws, mini_seed=args.mini_seed)
+    article_network = ArticleNetwork(subset_laws=args.subset_laws, subset_seed=args.subset_seed)
     edge_index_tensor = article_network.create_edge_index()
     edge_index_tensor = edge_index_tensor.to(device)
-    if args.mini_laws is not None:
-        print(f"[MINI] ArticleNetwork nodes {len(article_network.all_article_keys)} mini_laws={args.mini_laws} edges {edge_index_tensor.shape[1]//2}")
+    if args.subset_laws is not None:
+        print(f"[SUBSET] ArticleNetwork nodes {len(article_network.all_article_keys)} subset_laws={args.subset_laws} edges {edge_index_tensor.shape[1]//2}")
 
     # bi-encoder 혹은 cross-encoder 에서 caseaug method 가 있다면
     if args.biencoder_method == "caseaug" or args.crossencoder_method == "caseaug":
@@ -167,11 +171,11 @@ if __name__ == "__main__":
         # 결과를 저장할 리스트
         result_list = []
 
-        # early-load: tidak memuat 100% rows lalu slice
-        if args.mini_ratio is not None:
+        # early-load: do not load 100% of rows then slice
+        if args.subset_ratio is not None:
             from src.utils.utils import load_jsonl_early
-            rows, orig = load_jsonl_early("./data/datasets/LACD-biclassification/train-test-divide/test.jsonl", ratio=args.mini_ratio, seed=args.mini_seed, label_key="answer")
-            print(f"[MINI] early-load test.jsonl {orig}->{len(rows)} ratio={args.mini_ratio} pos {sum(1 for r in rows if r.get('answer'))}/{len(rows)} seed={args.mini_seed}")
+            rows, orig = load_jsonl_early("./data/datasets/LACD-biclassification/train-test-divide/test.jsonl", ratio=args.subset_ratio, seed=args.subset_seed, label_key="answer")
+            print(f"[SUBSET] early-load test.jsonl {orig}->{len(rows)} ratio={args.subset_ratio} pos {sum(1 for r in rows if r.get('answer'))}/{len(rows)} seed={args.subset_seed}")
         else:
             rows = []
             with open("./data/datasets/LACD-biclassification/train-test-divide/test.jsonl", 'r', encoding='utf-8') as file:
@@ -242,10 +246,10 @@ if __name__ == "__main__":
 
         # result_list를 jsonl 파일로 저장
         suffix = "_debug" if args.debug else ""
-        if args.mini_ratio is not None:
-            suffix += f"_mini{int(args.mini_ratio*100)}"
-        if args.mini_laws is not None:
-            suffix += f"_laws{args.mini_laws}"
+        if args.subset_ratio is not None:
+            suffix += f"_subset{int(args.subset_ratio*100)}"
+        if args.subset_laws is not None:
+            suffix += f"_laws{args.subset_laws}"
         with open("./outputs/retrieval_results/{0}_{1}_{2}{3}{4}.jsonl".format(args.biencoder_method,crossencoder_index_method ,args.crossencoder_method,"_noLM" if "noLM" in crossencoder_model_path else "", suffix), 'w', encoding='utf-8') as outfile:
             for result in result_list:
                 json.dump(result, outfile, ensure_ascii=False)

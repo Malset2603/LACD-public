@@ -37,14 +37,14 @@ if __name__ == "__main__":
     # biencoder method
     parser.add_argument("--biencoder_method",type=str,help="cosine or linear",default="cosine")
 
-    # debug mode: batasi sampel & epoch agar run cepat
+    # debug mode: limit samples & epoch for fast runs
     parser.add_argument("--debug", action="store_true", help="enable debug mode: use limited samples and 1 epoch")
     parser.add_argument("--debug_limit", type=int, default=20, help="number of samples per split in debug mode")
 
-    # mini mode via argumen: stratified sampling, tidak perlu buat dataset baru
-    parser.add_argument("--mini_ratio", type=float, default=None, help="mini via argumen: fraction (0,1] untuk stratified sampling train/val/test, e.g. 0.15 = 15% data. Lebih representatif dari --debug head")
-    parser.add_argument("--mini_seed", type=int, default=42, help="seed untuk mini sampling (stratified)")
-    parser.add_argument("--mini_laws", type=int, default=None, help="mini laws: batasi jumlah pasal dari laws.csv (graph-aware, hub-preserving). None = full 79k")
+    # subset sampling: stratified, no need to create a new dataset (alias mini_* deprecated)
+    parser.add_argument("--subset_ratio", "--sample_ratio", "--mini_ratio", type=float, default=None, dest="subset_ratio", help="subset sampling: fraction (0,1] for stratified sampling of train/val/test, e.g. 0.15 = 15%% of data. More representative than --debug head (alias --mini_ratio deprecated)")
+    parser.add_argument("--subset_seed", "--sample_seed", "--mini_seed", type=int, default=42, dest="subset_seed", help="seed for stratified subset sampling (alias --mini_seed deprecated)")
+    parser.add_argument("--subset_laws", "--mini_laws", "--law_nodes", type=int, default=None, dest="subset_laws", help="subset laws: limit number of articles from laws.csv (graph-aware, hub-preserving). None = full 79k (alias --mini_laws deprecated)")
 
     # batch size exposed (default 4 = original repo, backward compatible)
     parser.add_argument("--batch_size", type=int, default=4, help="per_device train/eval batch size (original: 4)")
@@ -55,6 +55,10 @@ if __name__ == "__main__":
     parser.add_argument("--gradient_checkpointing", action="store_true", help="enable gradient checkpointing to save VRAM")
 
     args = parser.parse_args()
+    # backward compat aliases
+    args.mini_ratio = args.subset_ratio
+    args.mini_laws = args.subset_laws
+    args.mini_seed = args.subset_seed
 
     case_multiplier = args.case_multiplier
     model_name = args.model
@@ -75,14 +79,14 @@ if __name__ == "__main__":
         from src.methods.case_augmentation.prompt import case_cache_start, case_cache_end
         case_cache_start()
 
-    # early-load: sampling terjadi saat baca file, tidak memuat 100% lalu slice
-    if args.mini_ratio is not None:
+    # early-load: sampling happens while reading the file, do not load 100% then slice
+    if args.subset_ratio is not None:
         from src.utils.utils import load_dataframe_early
-        train_df, orig_train = load_dataframe_early('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl', ratio=args.mini_ratio, seed=args.mini_seed, label_col="answer")
-        val_df, orig_val = load_dataframe_early('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl', ratio=args.mini_ratio, seed=args.mini_seed, label_col="answer")
-        test_df, orig_test = load_dataframe_early('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl', ratio=args.mini_ratio, seed=args.mini_seed, label_col="answer")
-        print(f"[MINI] early-load ratio={args.mini_ratio} seed={args.mini_seed} -> train {orig_train}->{len(train_df)} val {orig_val}->{len(val_df)} test {orig_test}->{len(test_df)} (stratified)")
-        print(f"[MINI] train pos {train_df['answer'].sum()}/{len(train_df)} ({train_df['answer'].mean():.1%}), val {val_df['answer'].sum()}/{len(val_df)} ({val_df['answer'].mean():.1%})")
+        train_df, orig_train = load_dataframe_early('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl', ratio=args.subset_ratio, seed=args.subset_seed, label_col="answer")
+        val_df, orig_val = load_dataframe_early('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl', ratio=args.subset_ratio, seed=args.subset_seed, label_col="answer")
+        test_df, orig_test = load_dataframe_early('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl', ratio=args.subset_ratio, seed=args.subset_seed, label_col="answer")
+        print(f"[SUBSET] early-load ratio={args.subset_ratio} seed={args.subset_seed} -> train {orig_train}->{len(train_df)} val {orig_val}->{len(val_df)} test {orig_test}->{len(test_df)} (stratified)")
+        print(f"[SUBSET] train pos {train_df['answer'].sum()}/{len(train_df)} ({train_df['answer'].mean():.1%}), val {val_df['answer'].sum()}/{len(val_df)} ({val_df['answer'].mean():.1%})")
     else:
         train_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl', lines=True)
         test_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl', lines=True)

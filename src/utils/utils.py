@@ -26,10 +26,10 @@ def seed_everything(seed):
     torch.backends.cudnn.benchmark = False
 
 def load_jsonl_early(jsonl_path, ratio=None, seed=42, label_key="answer"):
-    """Early-load stratified sampling: 2-pass streaming, tidak pernah memuat 100% rows ke RAM.
+    """Early-load stratified sampling: 2-pass streaming, never loads 100% of rows into RAM.
 
-    Deterministik: Random(seed+label) per kelas + Random(seed) final shuffle.
-    Identik dengan mini_rows_sample lama untuk rasio yang sama jika file tidak berubah.
+    Deterministic: Random(seed+label) per class + Random(seed) final shuffle.
+    Identical to the legacy mini_rows_sample for the same ratio if the file is unchanged.
     Returns (sampled_rows: list[dict], orig_count: int).
     """
     import json as _json
@@ -45,8 +45,8 @@ def load_jsonl_early(jsonl_path, ratio=None, seed=42, label_key="answer"):
                 rows.append(_json.loads(_line))
         return rows, len(rows)
     if ratio <= 0 or ratio > 1:
-        raise ValueError(f"mini_ratio must be in (0,1], got {ratio}")
-    # pass1: hanya hitung label -> simpan indices per label (int saja, bukan row)
+        raise ValueError(f"subset_ratio (alias mini_ratio) must be in (0,1], got {ratio}")
+    # pass1: only count labels -> store indices per label (ints only, not rows)
     label_to_indices = _collections.defaultdict(list)
     total = 0
     with open(jsonl_path, 'r', encoding='utf-8') as _f:
@@ -64,7 +64,7 @@ def load_jsonl_early(jsonl_path, ratio=None, seed=42, label_key="answer"):
             total += 1
     if total == 0:
         return [], 0
-    # tentukan keep indices per label deterministik
+    # determine keep indices per label deterministically
     keep_set = set()
     for _label, _indices in label_to_indices.items():
         _k = max(1, int(len(_indices) * ratio))
@@ -72,7 +72,7 @@ def load_jsonl_early(jsonl_path, ratio=None, seed=42, label_key="answer"):
         _shuffled = _indices.copy()
         _rnd.shuffle(_shuffled)
         keep_set.update(_shuffled[:_k])
-    # pass2: hanya load baris yang keep
+    # pass2: only load kept rows
     sampled = []
     with open(jsonl_path, 'r', encoding='utf-8') as _f:
         for _idx, _line in enumerate(_f):
@@ -82,14 +82,14 @@ def load_jsonl_early(jsonl_path, ratio=None, seed=42, label_key="answer"):
             if not _line:
                 continue
             sampled.append(_json.loads(_line))
-    # final shuffle deterministik (sama seperti mini_rows_sample lama)
+    # final deterministic shuffle (same as legacy mini_rows_sample)
     _rnd_all = _random.Random(seed)
     _rnd_all.shuffle(sampled)
     return sampled, total
 
 
 def load_dataframe_early(jsonl_path, ratio=None, seed=42, label_col="answer"):
-    """Early-load untuk DataFrame (finetune.py): wrapper load_jsonl_early -> pd.DataFrame."""
+    """Early-load for DataFrame (finetune.py): wrapper around load_jsonl_early -> pd.DataFrame."""
     import pandas as _pd
     rows, total = load_jsonl_early(jsonl_path, ratio=ratio, seed=seed, label_key=label_col)
     if not rows:

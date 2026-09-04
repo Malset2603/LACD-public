@@ -4,30 +4,38 @@ import tqdm
 import csv
 
 class ArticleNetwork:
-    def __init__(self, laws_path="./data/database/laws.csv", law_link_path = "./data/database/law_link_20240930_duplicate_eliminate.jsonl", mini_laws=None, mini_seed=42):
+    def __init__(self, laws_path="./data/database/laws.csv", law_link_path = "./data/database/law_link_20240930_duplicate_eliminate.jsonl", subset_laws=None, subset_seed=42, mini_laws=None, mini_seed=None):
         # Dictionary to store the network (adjacency list)
         self.article_network = {}
         # Dictionary to store the article key to index mapping
         self.article_key_to_idx = {}
         # List to store all article keys
         self.all_article_keys = []
-        self.mini_laws = mini_laws
-        self.mini_seed = mini_seed
+        # Canonical: subset_* ; alias mini_* for backward compat (deprecated)
+        if subset_laws is None and mini_laws is not None:
+            subset_laws = mini_laws
+        if subset_seed == 42 and mini_seed is not None:
+            subset_seed = mini_seed
+        self.subset_laws = subset_laws
+        self.subset_seed = subset_seed
+        # deprecated aliases
+        self.mini_laws = self.subset_laws
+        self.mini_seed = self.subset_seed
         
         # Load all articles from laws_html.jsonl
         self._load_nodes(laws_path)
         self._load_edges(law_link_path)
 
     def _load_nodes(self, laws_path):
-        # Early-load: hitung degree dulu (jika mini_laws), lalu streaming laws.csv hanya keep.
-        # Tidak pernah menyimpan 79k lalu slice; hanya simpan yang dibutuhkan.
+        # Early-load: compute degree first (if subset_laws), then stream laws.csv and keep only the subset.
+        # Never store all 79k then slice; only keep what is needed.
         import random as _random
         import collections as _collections
-        # 1) hitung degree early jika diminta
+        # 1) compute degree early if requested
         deg = None
         keep = None
         n_hub = 0
-        if self.mini_laws is not None:
+        if self.subset_laws is not None:
             try:
                 deg = _collections.Counter()
                 import json as _json
@@ -40,9 +48,9 @@ class ArticleNetwork:
                 deg = None
                 print(f"[MINI] degree early-load failed {e}, fallback random")
 
-        # 2) streaming laws.csv
-        if self.mini_laws is not None and deg is not None:
-            # kumpulkan semua keys dulu untuk tentukan hubs (79k str ~5MB, masih O(N) tapi sekali)
+        # 2) stream laws.csv
+        if self.subset_laws is not None and deg is not None:
+            # collect all keys first to determine hubs (79k strings ~5MB, still O(N) but once)
             all_keys_tmp = []
             with open(laws_path, encoding='utf-8', errors='ignore') as _f:
                 reader = csv.DictReader(_f)
@@ -50,32 +58,32 @@ class ArticleNetwork:
                     article_key = row['article_title'].replace("·", "ㆍ")
                     all_keys_tmp.append(article_key)
             total = len(all_keys_tmp)
-            if self.mini_laws < total:
+            if self.subset_laws < total:
                 sorted_keys = sorted(all_keys_tmp, key=lambda k: deg.get(k, 0), reverse=True)
-                n_hub = min(self.mini_laws // 2, len(sorted_keys))
+                n_hub = min(self.subset_laws // 2, len(sorted_keys))
                 hubs = sorted_keys[:n_hub]
                 remaining = [k for k in all_keys_tmp if k not in set(hubs)]
-                rnd = _random.Random(self.mini_seed)
+                rnd = _random.Random(self.subset_seed)
                 rnd.shuffle(remaining)
-                keep = set(hubs + remaining[: self.mini_laws - n_hub])
+                keep = set(hubs + remaining[: self.subset_laws - n_hub])
                 self.all_article_keys = [k for k in all_keys_tmp if k in keep]
-                print(f"[MINI] laws early-load sampled -> {len(self.all_article_keys)} (hubs {n_hub} + random {self.mini_laws - n_hub}) seed={self.mini_seed} target {self.mini_laws} total {total}")
+                print(f"[SUBSET] laws early-load sampled -> {len(self.all_article_keys)} (hubs {n_hub} + random {self.subset_laws - n_hub}) seed={self.subset_seed} target {self.subset_laws} total {total}")
             else:
                 self.all_article_keys = all_keys_tmp
-        elif self.mini_laws is not None:
-            # fallback random early-load tanpa degree
+        elif self.subset_laws is not None:
+            # fallback random early-load without degree
             all_keys_tmp = []
             with open(laws_path, encoding='utf-8', errors='ignore') as _f:
                 reader = csv.DictReader(_f)
                 for row in reader:
                     article_key = row['article_title'].replace("·", "ㆍ")
                     all_keys_tmp.append(article_key)
-            rnd = _random.Random(self.mini_seed)
+            rnd = _random.Random(self.subset_seed)
             rnd.shuffle(all_keys_tmp)
-            self.all_article_keys = all_keys_tmp[: self.mini_laws]
-            print(f"[MINI] laws random early-load -> {len(self.all_article_keys)} target {self.mini_laws}")
+            self.all_article_keys = all_keys_tmp[: self.subset_laws]
+            print(f"[SUBSET] laws random early-load -> {len(self.all_article_keys)} target {self.subset_laws}")
         else:
-            # full mode: streaming tanpa sampling
+            # full mode: streaming without sampling
             with open(laws_path, encoding='utf-8', errors='ignore') as _f:
                 reader = csv.DictReader(_f)
                 for row in reader:
