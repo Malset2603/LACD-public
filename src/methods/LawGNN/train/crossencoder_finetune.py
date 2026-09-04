@@ -175,10 +175,10 @@ if __name__ == "__main__":
 
     # Model initialization
 
-    # vectors 만들기. tensor 로 만들어야 함.
-    max_node_idx = edge_index_tensor.max().item()
+    # Build vector table sized to total nodes (not max edge index) to include isolated nodes.
+    num_nodes = len(article_network.all_article_keys)
     vectors_list = []
-    for idx in range(int(max_node_idx + 1)):
+    for idx in range(num_nodes):
         if idx in collection_dict.keys():
             vectors_list.append(torch.tensor(collection_dict[idx]["embedding"], dtype=torch.float32).to(device))
         else:
