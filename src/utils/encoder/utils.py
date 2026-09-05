@@ -96,17 +96,20 @@ def accuracy_score(y_true, y_pred):
 def recall_score(y_true, y_pred):
     true_positive = np.sum((y_true == 1) & (y_pred == 1))
     false_negative = np.sum((y_true == 1) & (y_pred == 0))
-    return true_positive / (true_positive + false_negative)
+    denom = true_positive + false_negative
+    return true_positive / denom if denom > 0 else 0.0
 
 def precision_score(y_true, y_pred):
     true_positive = np.sum((y_true == 1) & (y_pred == 1))
     false_positive = np.sum((y_true == 0) & (y_pred == 1))
-    return true_positive / (true_positive + false_positive)
+    denom = true_positive + false_positive
+    return true_positive / denom if denom > 0 else 0.0
 
 def f1_score(y_true, y_pred):
     precision = precision_score(y_true, y_pred)
     recall = recall_score(y_true, y_pred)
-    return 2 * (precision * recall) / (precision + recall)
+    denom = precision + recall
+    return 2 * (precision * recall) / denom if denom > 0 else 0.0
 
 
 def compute_metrics(p):
