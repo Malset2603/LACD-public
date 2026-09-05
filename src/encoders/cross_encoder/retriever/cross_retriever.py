@@ -26,8 +26,18 @@ def cross_retriever(article, top_k_articles, model_path, article_network:Article
     List of (article, score) where score represents the classification score of contradiction.
     """
     # Load tokenizer and cross-encoder model
-
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    # Cache tokenizer to avoid repeated HF reads; model is reloaded fresh each call
+    # to keep vector_tensor size == N (see FIX below).
+    global _CROSS_TOKENIZER_CACHE
+    try:
+        _CROSS_TOKENIZER_CACHE
+    except NameError:
+        _CROSS_TOKENIZER_CACHE = {}  # type: ignore
+    if model_path in _CROSS_TOKENIZER_CACHE:
+        tokenizer = _CROSS_TOKENIZER_CACHE[model_path]
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
+        _CROSS_TOKENIZER_CACHE[model_path] = tokenizer
     cross_encoder_model = torch.load(model_path + "/model.pth", weights_only=False)
     cross_encoder_model.eval()
 
@@ -159,8 +169,7 @@ def noLM_cross_retriever(article, top_k_articles, model_path, article_network:Ar
     Returns:
     List of (article, score) where score represents the classification score of contradiction.
     """
-    # Load tokenizer and cross-encoder model
-
+    # Load cross-encoder model (tokenizer cached above for cross_retriever)
     cross_encoder_model = torch.load(model_path + "/model.pth", weights_only=False)
     cross_encoder_model.eval()
 

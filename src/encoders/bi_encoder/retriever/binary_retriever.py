@@ -159,20 +159,51 @@ def binary_retriever(model_path, laws_csv_path, chroma_db_name, article_to_check
     """
 
     model = torch.load(model_path + "/model.pth", weights_only=False)
-    model.eval()  # 모델을 평가 모드로 설정
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    model.eval()
+    # Cache tokenizer to avoid repeated HF hub reads; keep model reload fresh
+    # so vector handling in cross_retriever (fresh N) stays correct.
+    global _TOKENIZER_CACHE
+    try:
+        _TOKENIZER_CACHE
+    except NameError:
+        _TOKENIZER_CACHE = {}  # type: ignore
+    if model_path in _TOKENIZER_CACHE:
+        tokenizer = _TOKENIZER_CACHE[model_path]
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
+        _TOKENIZER_CACHE[model_path] = tokenizer
+
+    # Cache raw and filtered DataFrames to avoid re-reading/filtering on every benchmark iteration.
+    # The previous per-iteration print broke tqdm progress bar (print inside tqdm loop).
+    global _LAWS_DF_CACHE, _FILTERED_DF_CACHE, _SUBSET_FILTER_LOGGED
+    try:
+        _LAWS_DF_CACHE
+    except NameError:
+        _LAWS_DF_CACHE = {}  # type: ignore
+        _FILTERED_DF_CACHE = {}  # type: ignore
+        _SUBSET_FILTER_LOGGED = False  # type: ignore
 
     laws_csv = laws_csv_path
-    laws_df = pd.read_csv(laws_csv)
+    if laws_csv not in _LAWS_DF_CACHE:
+        _LAWS_DF_CACHE[laws_csv] = pd.read_csv(laws_csv)
+    laws_df = _LAWS_DF_CACHE[laws_csv]
 
     # early-load: filter laws_df by ArticleNetwork keep set if provided (subset_laws / mini_laws deprecated)
     if article_network is not None and hasattr(article_network, 'all_article_keys'):
         allowed_keys = set(article_network.all_article_keys)
     if allowed_keys is not None:
-        # laws.csv article_title is the key (normalize · -> ㆍ)
-        before = len(laws_df)
-        laws_df = laws_df[laws_df['article_title'].apply(lambda x: str(x).replace("·", "ㆍ") in allowed_keys)]
-        print(f"[SUBSET] Chroma filter {before}->{len(laws_df)} rows by allowed_keys ({len(allowed_keys)} keep)")
+        cache_key = id(article_network) if article_network is not None else hash(frozenset(allowed_keys))
+        if cache_key in _FILTERED_DF_CACHE:
+            laws_df = _FILTERED_DF_CACHE[cache_key]
+        else:
+            before = len(laws_df)
+            filtered_df = laws_df[laws_df['article_title'].apply(lambda x: str(x).replace("·", "ㆍ") in allowed_keys)]
+            _FILTERED_DF_CACHE[cache_key] = filtered_df
+            laws_df = filtered_df
+            # Log only once; use tqdm.write to avoid breaking the outer tqdm bar in src/main.py:194
+            if not _SUBSET_FILTER_LOGGED:
+                tqdm.write(f"[SUBSET] Chroma filter {before}->{len(laws_df)} rows by allowed_keys ({len(allowed_keys)} keep)")
+                _SUBSET_FILTER_LOGGED = True
 
     from src.utils.encoder.biencoder_utils import load_chromaDB_byname
     chroma_collection = load_chromaDB_byname(chroma_db_name)
