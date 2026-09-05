@@ -1,3 +1,4 @@
+import os
 import chromadb
 import tqdm
 import torch
@@ -250,6 +251,7 @@ if __name__ == "__main__":
             suffix += f"_subset{int(args.subset_ratio*100)}"
         if args.subset_laws is not None:
             suffix += f"_laws{args.subset_laws}"
+        os.makedirs("./outputs/retrieval_results", exist_ok=True)
         with open("./outputs/retrieval_results/{0}_{1}_{2}{3}{4}.jsonl".format(args.biencoder_method,crossencoder_index_method ,args.crossencoder_method,"_noLM" if "noLM" in crossencoder_model_path else "", suffix), 'w', encoding='utf-8') as outfile:
             for result in result_list:
                 json.dump(result, outfile, ensure_ascii=False)
