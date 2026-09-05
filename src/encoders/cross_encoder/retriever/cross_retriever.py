@@ -31,17 +31,30 @@ def cross_retriever(article, top_k_articles, model_path, article_network:Article
     cross_encoder_model = torch.load(model_path + "/model.pth", weights_only=False)
     cross_encoder_model.eval()
 
-    if article_key_function(article) not in article_network.article_key_to_idx.keys():
-        article_idx = article_network.add_article_node(article)
+    # FIX: avoid mutating the global ArticleNetwork shared in src/main.py:97-98.
+    # The model vector_tensor is reloaded fresh on every call (size N=subset_laws),
+    # but the previous add_article_node mutated the network to N+k -> index OOB in GNN
+    # src/methods/LawGNN/gnn_architecture.py:279  x[article_idx]
+    query_key = article_key_function(article)
+    is_new_query = query_key not in article_network.article_key_to_idx
+    if is_new_query:
+        # temporary index = append position (valid after cat)
+        article_idx = cross_encoder_model.vector_tensor.shape[0]
     else:
-        article_idx = article_network.article_key_to_idx[article_key_function(article)]
+        article_idx = article_network.article_key_to_idx[query_key]
 
-    if index_method != "none":
-        if isinstance(article_vector, np.ndarray):
-            article_vector = torch.tensor(article_vector).to(cross_encoder_model.vector_tensor.device)
-        if article_vector.dim() == 1: # type: ignore
-            article_vector = article_vector.unsqueeze(0)  # type: ignore # (1, D) 형태로 변환
-        cross_encoder_model.vector_tensor = torch.cat([cross_encoder_model.vector_tensor, article_vector], dim=0) # type: ignore
+    if index_method != "none" and is_new_query:
+        # hybrid: article_vector from binary_retriever is available, cross-only: None -> zeros
+        if article_vector is None:
+            article_vector_tensor = torch.zeros((1, cross_encoder_model.vector_tensor.shape[1]), device=cross_encoder_model.vector_tensor.device)
+        else:
+            if isinstance(article_vector, np.ndarray):
+                article_vector_tensor = torch.tensor(article_vector).to(cross_encoder_model.vector_tensor.device)
+            else:
+                article_vector_tensor = article_vector.to(cross_encoder_model.vector_tensor.device)  # type: ignore
+            if article_vector_tensor.dim() == 1: # type: ignore
+                article_vector_tensor = article_vector_tensor.unsqueeze(0)  # type: ignore
+        cross_encoder_model.vector_tensor = torch.cat([cross_encoder_model.vector_tensor, article_vector_tensor], dim=0) # type: ignore
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     cross_encoder_model.to(device)
@@ -151,16 +164,24 @@ def noLM_cross_retriever(article, top_k_articles, model_path, article_network:Ar
     cross_encoder_model = torch.load(model_path + "/model.pth", weights_only=False)
     cross_encoder_model.eval()
 
-    if article_key_function(article) not in article_network.article_key_to_idx.keys():
-        article_idx = article_network.add_article_node(article)
+    # FIX: same as cross_retriever - avoid mutating global state, cat only for new node
+    query_key = article_key_function(article)
+    is_new_query = query_key not in article_network.article_key_to_idx
+    if is_new_query:
+        article_idx = cross_encoder_model.vector_tensor.shape[0]
         if index_method != "none":
-            if isinstance(article_vector, np.ndarray):
-                article_vector = torch.tensor(article_vector).to(cross_encoder_model.vector_tensor.device)
-            if article_vector.dim() == 1: # type: ignore
-                article_vector = article_vector.unsqueeze(0)  # type: ignore # (1, D) 형태로 변환
-            cross_encoder_model.vector_tensor = torch.cat([cross_encoder_model.vector_tensor, article_vector], dim=0) # type: ignore
+            if article_vector is None:
+                article_vector_tensor = torch.zeros((1, cross_encoder_model.vector_tensor.shape[1]), device=cross_encoder_model.vector_tensor.device)
+            else:
+                if isinstance(article_vector, np.ndarray):
+                    article_vector_tensor = torch.tensor(article_vector).to(cross_encoder_model.vector_tensor.device)
+                else:
+                    article_vector_tensor = article_vector.to(cross_encoder_model.vector_tensor.device)  # type: ignore
+                if article_vector_tensor.dim() == 1: # type: ignore
+                    article_vector_tensor = article_vector_tensor.unsqueeze(0)  # type: ignore
+            cross_encoder_model.vector_tensor = torch.cat([cross_encoder_model.vector_tensor, article_vector_tensor], dim=0) # type: ignore
     else:
-        article_idx = article_network.article_key_to_idx[article_key_function(article)]
+        article_idx = article_network.article_key_to_idx[query_key]
 
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
