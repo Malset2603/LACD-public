@@ -113,10 +113,25 @@ python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/qwen2-0.
 # Debug - benchmark on 5 samples only, output -> outputs/retrieval_results/*_debug.jsonl
 python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/qwen2-0.5-baseline --biencoder_model_path ./data/models/LACD-bi/kbb-baseline --chroma_db_name kbb-baseline --retrieval_method hybrid --crossencoder_index_method none --crossencoder_method baseline --biencoder_method baseline --mode test-benchmark --debug --debug_limit 5
 
+# Custom output directory to avoid overwriting across experiments
+python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/qwen2-0.5-baseline --biencoder_model_path ./data/models/LACD-bi/kbb-baseline --chroma_db_name kbb-baseline --retrieval_method hybrid --crossencoder_index_method none --crossencoder_method baseline --biencoder_method baseline --mode test-benchmark --output_dir ./outputs/my_experiment --output_name my_run
+
 # Debug - classical retrievers (no GPU, fastest)
 python ./src/main.py --chroma_db_name kbb-baseline --biencoder_method baseline --retrieval_method tfidf --biencoder_top_k 2
 python ./src/main.py --chroma_db_name kbb-baseline --biencoder_method baseline --retrieval_method bm25 --biencoder_top_k 2
 python ./src/main.py --chroma_db_name kbb-baseline --biencoder_method baseline --retrieval_method tfidf --mode test-benchmark --debug --debug_limit 5
+```
+
+### Evaluating retrieval results
+
+`--mode test-benchmark` only saves `outputs/retrieval_results/*.jsonl` (no metrics printed). Evaluate separately:
+
+```bash
+# Single file (subset example)
+python src/eval/retrieval_eval.py --result_path ./outputs/retrieval_results/baseline_gat_baseline_laws2000.jsonl --top_k 5
+
+# Whole directory (all experiments in custom output_dir)
+python src/eval/retrieval_eval.py --result_path ./outputs/my_experiment --top_k 5 --ground_truth_path ./data/datasets/LACD-biclassification/train-test-divide/test.jsonl
 ```
 
 ### Testing query processing time
@@ -160,6 +175,8 @@ python ./src/methods/LawGNN/train/crossencoder_finetune.py --tag kbb-baseline-gr
 | `--subset_ratio 0.15` | `None` (full) | Early-load stratified fraction `(0,1]` for `train/val/test.jsonl` preserving `P(y=1)=12.8%` via `src/utils/utils.py:28`. E.g., `0.15` = `1399->209`, `469->70`. Statistically representative, unlike `--debug` `head(N)`. Deterministic across sessions. Alias: `--sample_ratio`, `--mini_ratio` (deprecated). |
 | `--subset_laws 2000` | `None` (79k) | Early-load `LMGraph` `ArticleNetwork` `src/methods/LawGNN/article_network/article_network.py:21` — degree is computed first from `law_link`, then `laws.csv` is streamed keeping only `keep` with hub-preserving `50%` top-degree + `50%` random. `2000` nodes `~7.9k` edges vs `79k/339k` full. Chroma build `~4 min` vs `~60 min`. Alias: `--mini_laws`, `--law_nodes` (deprecated). |
 | `--subset_seed 42` | `42` | Reproducible seed for both samplings above (`seed+label` per class). Alias: `--mini_seed` (deprecated). |
+| `--output_dir ./outputs/retrieval_results` | `./outputs/retrieval_results` | Custom directory for `test-benchmark` results to avoid overwriting across experiments, e.g. `--output_dir ./outputs/my_experiment`. Auto-created. |
+| `--output_name my_run` | `None` (auto) | Custom filename (without `.jsonl`) for retrieval results; if not set, auto-generated as `{biencoder_method}_{crossencoder_index_method}_{crossencoder_method}{suffix}.jsonl`. |
 
 Subset outputs are automatically suffixed `_subset15_laws2000` to avoid overwriting full results, e.g., `*_subset15_laws2000.jsonl` (legacy `_mini*` still readable via alias).
 
