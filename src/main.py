@@ -42,6 +42,10 @@ if __name__ == "__main__":
     parser.add_argument("--subset_seed", "--sample_seed", "--mini_seed", type=int, default=42, dest="subset_seed", help="seed for subset sampling (alias --mini_seed deprecated)")
     parser.add_argument("--subset_laws", "--mini_laws", "--law_nodes", type=int, default=None, dest="subset_laws", help="subset laws: limit number of articles in LMGraph (graph-aware) (alias --mini_laws deprecated)")
 
+    # output location for retrieval results (avoid overwriting across experiments)
+    parser.add_argument("--output_dir", type=str, default="./outputs/retrieval_results", help="directory to save retrieval results, e.g. ./outputs/my_experiment to avoid overwriting (default: ./outputs/retrieval_results)")
+    parser.add_argument("--output_name", type=str, default=None, help="optional custom filename (without extension) for retrieval results; if not set, auto-generated from methods and suffix")
+
     # crossencoder vector index 사용하는지도 필요함.
     # GNN method 적어야 함.
 
@@ -251,8 +255,15 @@ if __name__ == "__main__":
             suffix += f"_subset{int(args.subset_ratio*100)}"
         if args.subset_laws is not None:
             suffix += f"_laws{args.subset_laws}"
-        os.makedirs("./outputs/retrieval_results", exist_ok=True)
-        with open("./outputs/retrieval_results/{0}_{1}_{2}{3}{4}.jsonl".format(args.biencoder_method,crossencoder_index_method ,args.crossencoder_method,"_noLM" if "noLM" in crossencoder_model_path else "", suffix), 'w', encoding='utf-8') as outfile:
+        output_dir = args.output_dir
+        os.makedirs(output_dir, exist_ok=True)
+        if args.output_name:
+            filename = f"{args.output_name}.jsonl" if not args.output_name.endswith(".jsonl") else args.output_name
+        else:
+            filename = "{0}_{1}_{2}{3}{4}.jsonl".format(args.biencoder_method,crossencoder_index_method ,args.crossencoder_method,"_noLM" if "noLM" in crossencoder_model_path else "", suffix)
+        output_path = os.path.join(output_dir, filename)
+        print(f"[OUTPUT] saving retrieval results to {output_path}")
+        with open(output_path, 'w', encoding='utf-8') as outfile:
             for result in result_list:
                 json.dump(result, outfile, ensure_ascii=False)
                 outfile.write('\n')  # 각 결과를 한 줄에 저장
