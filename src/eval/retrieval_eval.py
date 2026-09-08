@@ -130,6 +130,7 @@ if __name__ == "__main__":
     parser.add_argument("--top_k", type=int, default=5, help="Top-K for recall/precision (default 5)")
     parser.add_argument("--biencoder_top_k", type=int, default=10, help="Biencoder top-K used during retrieval (for logging only)")
     parser.add_argument("--output_missed", type=str, default=None, help="Optional path to save missed_pairs.jsonl")
+    parser.add_argument("--metrics_output", type=str, default=None, help="Optional path to save metrics JSON (e.g. ./outputs/grex-10k-gat/metrics.json); if not provided, metrics are only printed")
     args = parser.parse_args()
 
     rows = load_ground_truth(args.ground_truth_path)
@@ -150,9 +151,11 @@ if __name__ == "__main__":
             raise FileNotFoundError(f"Result path not found: {args.result_path}")
 
     all_missed = []
+    all_metrics = []
     for rf in sorted(result_files):
         res = evaluate_single(rf, rows, top_k=args.top_k, biencoder_top_k=args.biencoder_top_k)
         all_missed.extend(res["missed_pairs"])
+        all_metrics.append({k: v for k, v in res.items() if k != "missed_pairs"})
 
     if args.output_missed and all_missed:
         with open(args.output_missed, 'w', encoding='utf-8') as outfile:
@@ -160,3 +163,9 @@ if __name__ == "__main__":
                 json.dump(pair, outfile, ensure_ascii=False)
                 outfile.write('\n')
         print(f"[INFO] saved {len(all_missed)} missed pairs to {args.output_missed}")
+
+    if args.metrics_output:
+        os.makedirs(os.path.dirname(os.path.abspath(args.metrics_output)) or ".", exist_ok=True)
+        with open(args.metrics_output, 'w', encoding='utf-8') as f:
+            json.dump({"top_k": args.top_k, "ground_truth": args.ground_truth_path, "results": all_metrics, "args": vars(args)}, f, ensure_ascii=False, indent=2)
+        print(f"[METRICS] saved to {args.metrics_output}")

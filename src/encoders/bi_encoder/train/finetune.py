@@ -54,6 +54,9 @@ if __name__ == "__main__":
     parser.add_argument("--fp16", action="store_true", help="enable fp16 training (original: false)")
     parser.add_argument("--gradient_checkpointing", action="store_true", help="enable gradient checkpointing to save VRAM")
 
+    # optional metrics output (no default; if not provided, metrics are only printed)
+    parser.add_argument("--metrics_output", type=str, default=None, help="optional path to save metrics JSON (e.g. ./outputs/metrics/bi-10k.json)")
+
     args = parser.parse_args()
     # backward compat aliases
     args.mini_ratio = args.subset_ratio
@@ -266,6 +269,21 @@ if __name__ == "__main__":
         writer.add_scalar("Test/Accuracy", test_accuracy)
         writer.add_scalar("Test/ROC_AUC", test_roc_auc)
 
+        # optionally save metrics to file
+        if args.metrics_output:
+            import json as _json, os as _os
+            _os.makedirs(_os.path.dirname(_os.path.abspath(args.metrics_output)) or ".", exist_ok=True)
+            _payload = {
+                "tag": tag,
+                "mode": args.mode,
+                "model": model_name,
+                "metrics": {"f1": test_f1, "accuracy": test_accuracy, "roc_auc": test_roc_auc, "precision": test_results.get("eval_precision", 0), "recall": test_results.get("eval_recall", 0)},
+                "args": vars(args),
+            }
+            with open(args.metrics_output, 'w', encoding='utf-8') as _f:
+                _json.dump(_payload, _f, ensure_ascii=False, indent=2)
+            print(f"[METRICS] saved to {args.metrics_output}")
+
         if args.model_save_path == "None":
             path = f"./data/models/LACD-bi/{tag}"
         else:
@@ -315,6 +333,20 @@ if __name__ == "__main__":
         print(f"Test recall Score: {test_recall:.1%}")
         print(f"Test Accuracy: {test_accuracy:.1%}")
         print(f"Test ROC AUC: {test_roc_auc:.1%}")
+
+        if args.metrics_output:
+            import json as _json, os as _os
+            _os.makedirs(_os.path.dirname(_os.path.abspath(args.metrics_output)) or ".", exist_ok=True)
+            _payload = {
+                "tag": tag,
+                "mode": args.mode,
+                "model": model_name,
+                "metrics": {"f1": test_f1, "accuracy": test_accuracy, "roc_auc": test_roc_auc, "precision": test_precision, "recall": test_recall},
+                "args": vars(args),
+            }
+            with open(args.metrics_output, 'w', encoding='utf-8') as _f:
+                _json.dump(_payload, _f, ensure_ascii=False, indent=2)
+            print(f"[METRICS] saved to {args.metrics_output}")
 
     if args.method == "case-augmentation" or args.method == "case-concat-augmentation":
         case_cache_end()

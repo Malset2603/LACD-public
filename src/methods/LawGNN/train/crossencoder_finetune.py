@@ -105,6 +105,9 @@ if __name__ == "__main__":
     parser.add_argument("--fp16", action="store_true", help="enable fp16")
     parser.add_argument("--gradient_checkpointing", action="store_true", help="enable gradient checkpointing")
 
+    # optional metrics output (no default; if not provided, metrics are only printed)
+    parser.add_argument("--metrics_output", type=str, default=None, help="optional path to save metrics JSON (e.g. ./outputs/metrics/cross-10k.json)")
+
     args = parser.parse_args()
     # backward compat aliases
     args.mini_ratio = args.subset_ratio
@@ -264,6 +267,21 @@ if __name__ == "__main__":
         writer.add_scalar("Test/Accuracy", test_accuracy)
         writer.add_scalar("Test/ROC_AUC", test_roc_auc)
 
+        # optionally save metrics to file
+        if args.metrics_output:
+            import json as _json
+            os.makedirs(os.path.dirname(os.path.abspath(args.metrics_output)) or ".", exist_ok=True)
+            _payload = {
+                "tag": args.tag,
+                "mode": args.mode,
+                "gnn_method": gnn_method,
+                "metrics": {"f1": test_f1, "accuracy": test_accuracy, "roc_auc": test_roc_auc, "precision": test_results.get("eval_precision", 0), "recall": test_results.get("eval_recall", 0)},
+                "args": vars(args),
+            }
+            with open(args.metrics_output, 'w', encoding='utf-8') as _f:
+                _json.dump(_payload, _f, ensure_ascii=False, indent=2)
+            print(f"[METRICS] saved to {args.metrics_output}")
+
         if args.model_save_path == "None":
             path = f"./data/models/LACD-cross/gnns/{args.tag}"
         else:
@@ -301,8 +319,22 @@ if __name__ == "__main__":
         print(f"Test recall Score: {test_recall:.1%}")
         print(f"Test Accuracy: {test_accuracy:.1%}")
         print(f"Test ROC AUC: {test_roc_auc:.1%}")
-    
 
+        if args.metrics_output:
+            import json as _json
+            os.makedirs(os.path.dirname(os.path.abspath(args.metrics_output)) or ".", exist_ok=True)
+            _payload = {
+                "tag": args.tag,
+                "mode": args.mode,
+                "gnn_method": gnn_method,
+                "metrics": {"f1": test_f1, "accuracy": test_accuracy, "roc_auc": test_roc_auc, "precision": test_precision, "recall": test_recall},
+                "args": vars(args),
+            }
+            with open(args.metrics_output, 'w', encoding='utf-8') as _f:
+                _json.dump(_payload, _f, ensure_ascii=False, indent=2)
+            print(f"[METRICS] saved to {args.metrics_output}")
+     
+ 
 
     
     if case_augmentation_method == "case-augmentation" or case_augmentation_method == "case-concat-augmentation":
