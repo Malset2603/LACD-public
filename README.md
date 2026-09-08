@@ -132,6 +132,25 @@ python src/eval/retrieval_eval.py --result_path ./outputs/retrieval_results/base
 
 # Whole directory (all experiments in custom output_dir)
 python src/eval/retrieval_eval.py --result_path ./outputs/my_experiment --top_k 5 --ground_truth_path ./data/datasets/LACD-biclassification/train-test-divide/test.jsonl
+
+# Save metrics to file (optional, no default — if not provided, only printed)
+python src/eval/retrieval_eval.py --result_path ./outputs/my_experiment --top_k 5 --metrics_output ./outputs/my_experiment/metrics.json
+```
+
+### Saving metrics (optional, all scripts)
+
+All training and evaluation scripts support `--metrics_output` with **no default**. If not provided, metrics are only printed. If provided, the directory is auto-created and the file is overwritten:
+
+```bash
+# Bi-encoder training
+python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-baseline --metrics_output ./outputs/metrics/bi-baseline.json
+
+# Cross-encoder GNN training
+python ./src/methods/LawGNN/train/crossencoder_finetune.py --tag kbb-gat --gnn_method gat --chroma_db_name kbb-baseline --metrics_output ./outputs/metrics/cross-gat.json
+python ./src/methods/LawGNN/train/crossencoder_finetune_noLM.py --tag kbb-gat-noLM --gnn_method gat --chroma_db_name kbb-baseline --metrics_output ./outputs/metrics/cross-gat-noLM.json
+
+# Retrieval evaluation
+python src/eval/retrieval_eval.py --result_path ./outputs/my_experiment --metrics_output ./outputs/my_experiment/metrics.json
 ```
 
 ### Testing query processing time
