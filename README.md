@@ -137,6 +137,28 @@ python src/eval/retrieval_eval.py --result_path ./outputs/my_experiment --top_k 
 python src/eval/retrieval_eval.py --result_path ./outputs/my_experiment --top_k 5 --metrics_output ./outputs/my_experiment/metrics.json
 ```
 
+### Pipeline orchestrator (recommended for clean experiments)
+
+Run all 5 steps with one command — consistent tags and no typos, supports both mini and full data:
+
+```bash
+# Mini (10k laws, ~4 min) — your current experiment
+python run_pipeline.py --exp grex-10k --subset_laws 10000 --epoch 2 --max_length 512 --fp16
+
+# Full data (79k laws, ~60 min) — final paper result
+python run_pipeline.py --exp grex-full --epoch 3
+
+# With explicit metrics and custom output dir (auto-created, overwritten if exists)
+python run_pipeline.py --exp grex-10k --subset_laws 10000 --epoch 2 --max_length 512 --fp16 --output_dir ./outputs/grex-10k-gat
+
+# Rerun only retrieval + eval (e.g., after changing top_k)
+python run_pipeline.py --exp grex-10k --subset_laws 10000 --steps 4,5 --top_k 5
+
+# Dry run to see commands without executing
+python run_pipeline.py --exp grex-10k --subset_laws 10000 --dry_run
+```
+Outputs are collected under `--output_dir` (default `./outputs/{exp}`) as `metrics-bi.json`, `metrics-cross.json`, `metrics-retrieval.json`, and aggregated `summary.json` (overwritten if exists, auto-created if not).
+
 ### Saving metrics (optional, all scripts)
 
 All training and evaluation scripts support `--metrics_output` with **no default**. If not provided, metrics are only printed. If provided, the directory is auto-created and the file is overwritten:
