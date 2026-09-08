@@ -1,7 +1,6 @@
 
 import os
 import json
-import pandas as pd
 import torch
 import numpy as np
 from sklearn.metrics import roc_auc_score

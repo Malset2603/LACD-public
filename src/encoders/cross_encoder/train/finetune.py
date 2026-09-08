@@ -1,7 +1,7 @@
 # contradiction detection model 을 훈련하기 위한 코드
 # 여기에서는 Full-fine-tune 만을 다룬다.
 
-import pandas as pd
+import polars as pl
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from transformers import Trainer, TrainingArguments
 import torch
@@ -53,9 +53,9 @@ if __name__ == "__main__":
 
 
     # 분할된 인덱스를 사용하여 train, test 데이터프레임 생성
-    train_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl', lines=True)
-    test_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl', lines=True)
-    val_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl', lines=True)
+    train_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl')
+    test_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl')
+    val_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl')
 
 
     if args.data_augmentation == "None":
@@ -67,21 +67,19 @@ if __name__ == "__main__":
         train_df = data_augmentation(train_df, args.data_augmentation)
 
     # train_df에 'case_idx' 컬럼을 추가하고 모든 값을 0으로 설정
-    train_df['case_idx'] = 0
-    test_df['case_idx'] = 0
-    val_df['case_idx'] = 0
+    train_df = train_df.with_columns(pl.lit(0).alias("case_idx"))
+    test_df = test_df.with_columns(pl.lit(0).alias("case_idx"))
+    val_df = val_df.with_columns(pl.lit(0).alias("case_idx"))
 
-    original_train_df = train_df.copy()
+    original_train_df = train_df.clone()
     # case_multiplier가 1보다 클 경우에만 아래의 코드를 실행
     if "case" in args.method and case_multiplier > 1:
         # 1부터 case_multiplier-1까지 반복
         for i in range(1, case_multiplier):
             # train_df를 복제
-            temp_df = original_train_df.copy()
-            # 복제한 데이터프레임의 'case_idx' 값을 i로 설정
-            temp_df['case_idx'] = i
+            temp_df = original_train_df.clone().with_columns(pl.lit(i).alias("case_idx"))
             # 복제한 데이터프레임을 원래 데이터프레임에 붙여넣기
-            train_df = pd.concat([train_df, temp_df], ignore_index=True)
+            train_df = pl.concat([train_df, temp_df], how="vertical")
 
     
     train_dataset = NLIDataset(train_df, tokenizer, max_length=MAX_TOKEN_LENGTH, method=args.method)

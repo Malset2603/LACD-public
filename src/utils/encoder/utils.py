@@ -1,4 +1,4 @@
-import pandas as pd
+import polars as pl
 import numpy as np
 from transformers.trainer_callback import TrainerCallback
 import torch
@@ -34,60 +34,89 @@ class TensorBoardCallback(TrainerCallback):
                     self.writer.add_scalar(key, value, state.global_step)
 
 def data_augmentation(df, data_aug = "augmentation"):
-    augmented_df = df.copy()
+    augmented_df = df.clone()
 
-    # if data_aug != "noswap":
+    # swap article1 <-> article2
+    swapped_df = df.select(
+        [pl.col("article2").alias("article1"), pl.col("article1").alias("article2")]
+        + [pl.col(c) for c in df.columns if c not in ("article1", "article2")]
+    )
+    augmented_df = pl.concat([augmented_df, swapped_df], how="vertical")
 
-    swapped_df = df.copy()
-    swapped_df[["article1", "article2"]] = swapped_df[["article2", "article1"]]
-    augmented_df = pd.concat([augmented_df, swapped_df], ignore_index=True)
+    # groupby article1: join article2 with '\n', any answer
+    # Use Python loop for string join to avoid Polars str.join quirks on small data
+    grouped = {}
+    for row in augmented_df.iter_rows(named=True):
+        k = row["article1"]
+        if k not in grouped:
+            grouped[k] = {"article2_list": [], "answer": False}
+        grouped[k]["article2_list"].append(row["article2"])
+        grouped[k]["answer"] = grouped[k]["answer"] or bool(row["answer"])
+    merged_rows = [
+        {"article1": k, "article2": "\n".join(v["article2_list"]), "answer": v["answer"]}
+        for k, v in grouped.items()
+    ]
+    # Preserve other columns if present (e.g., case_idx) — fill with defaults
+    extra_cols = [c for c in df.columns if c not in ("article1", "article2", "answer")]
+    for r in merged_rows:
+        for c in extra_cols:
+            r[c] = None
+    merged_df = pl.DataFrame(merged_rows) if merged_rows else pl.DataFrame(schema={c: df.schema[c] for c in df.columns})
+    # Ensure column order matches augmented_df
+    if merged_df.height > 0:
+        # Reorder to match df columns
+        merged_df = merged_df.select(df.columns)
+        augmented_df = pl.concat([augmented_df, merged_df], how="vertical")
 
-    merged_df = augmented_df.groupby("article1").agg({
-        "article2": '\n'.join,
-        "answer": 'any'
-    }).reset_index()
-
-    augmented_df = pd.concat([augmented_df, merged_df], ignore_index=True)
-
-    true_rows = df[df["answer"] == True]
+    # Use original df for sampling true rows
+    true_rows = df.filter(pl.col("answer") == True)
+    # Collect all article texts for random sampling
+    all_texts = df["article1"].to_list() + df["article2"].to_list()
     additional_rows = []
 
-    # if data_aug != "noB": #원래는 noA 였음.
-    for idx, row in true_rows.iterrows():
-        random_value = np.random.choice(df["article1"].tolist() + df["article2"].tolist())
+    for row in true_rows.iter_rows(named=True):
+        random_value = np.random.choice(all_texts)
         new_row = row.copy()
         new_row["article2"] = "{}\n{}".format(row["article2"], random_value)
         additional_rows.append(new_row)
 
-    # if data_aug != "noA": #원래는 noB
-    for idx, row in true_rows.iterrows():
-        random_value = np.random.choice(df["article1"].tolist() + df["article2"].tolist())
+    for row in true_rows.iter_rows(named=True):
+        random_value = np.random.choice(all_texts)
         new_row = row.copy()
         new_row["article1"] = "{}\n{}".format(row["article1"], random_value)
         additional_rows.append(new_row)
 
-    additional_df = pd.DataFrame(additional_rows)
-    augmented_df = pd.concat([augmented_df, additional_df], ignore_index=True)
+    if additional_rows:
+        additional_df = pl.DataFrame(additional_rows)
+        # Ensure schema matches
+        additional_df = additional_df.select(df.columns) if set(additional_df.columns) == set(df.columns) else additional_df
+        augmented_df = pl.concat([augmented_df, additional_df], how="vertical")
 
     return augmented_df
 
 def balance_dataframe(df, column="answer"):
-    true_count = df[df[column] == True].shape[0]
-    false_count = df[df[column] == False].shape[0]
+    # Sample to balance classes
+    true_count = df.filter(pl.col(column) == True).height
+    false_count = df.filter(pl.col(column) == False).height
+
+    if true_count == false_count or true_count == 0 or false_count == 0:
+        return df
 
     if true_count > false_count:
-        larger_group = True
-        smaller_group = False
+        # keep all false, sample true down to false_count
+        false_df = df.filter(pl.col(column) == False)
+        true_df = df.filter(pl.col(column) == True)
+        # sample true
+        true_df = true_df.sample(n=false_count, seed=42, shuffle=True)
+        balanced_df = pl.concat([false_df, true_df], how="vertical")
     else:
-        larger_group = False
-        smaller_group = True
+        true_df = df.filter(pl.col(column) == True)
+        false_df = df.filter(pl.col(column) == False)
+        false_df = false_df.sample(n=true_count, seed=42, shuffle=True)
+        balanced_df = pl.concat([true_df, false_df], how="vertical")
 
-    delete_count = abs(true_count - false_count)
-    larger_group_indices = df[df[column] == larger_group].index
-    drop_indices = np.random.choice(larger_group_indices, delete_count, replace=False)
-    balanced_df = df.drop(drop_indices)
-
-    return balanced_df
+    # shuffle final
+    return balanced_df.sample(fraction=1.0, shuffle=True, seed=42)
 
 def accuracy_score(y_true, y_pred):
     # print(f'y_true shape: {y_true.shape}, y_pred shape: {y_pred.shape}')

@@ -1,6 +1,6 @@
 import torch
 from transformers import AutoTokenizer
-import pandas as pd
+import polars as pl
 import chromadb
 
 from torch.nn.functional import cosine_similarity
@@ -185,7 +185,7 @@ def binary_retriever(model_path, laws_csv_path, chroma_db_name, article_to_check
 
     laws_csv = laws_csv_path
     if laws_csv not in _LAWS_DF_CACHE:
-        _LAWS_DF_CACHE[laws_csv] = pd.read_csv(laws_csv)
+        _LAWS_DF_CACHE[laws_csv] = pl.read_csv(laws_csv, infer_schema_length=10000)
     laws_df = _LAWS_DF_CACHE[laws_csv]
 
     # early-load: filter laws_df by ArticleNetwork keep set if provided (subset_laws / mini_laws deprecated)
@@ -196,13 +196,16 @@ def binary_retriever(model_path, laws_csv_path, chroma_db_name, article_to_check
         if cache_key in _FILTERED_DF_CACHE:
             laws_df = _FILTERED_DF_CACHE[cache_key]
         else:
-            before = len(laws_df)
-            filtered_df = laws_df[laws_df['article_title'].apply(lambda x: str(x).replace("·", "ㆍ") in allowed_keys)]
+            before = laws_df.height
+            # Normalize · -> ㆍ and filter by allowed_keys
+            filtered_df = laws_df.filter(
+                pl.col("article_title").str.replace_all("·", "ㆍ").is_in(list(allowed_keys))
+            )
             _FILTERED_DF_CACHE[cache_key] = filtered_df
             laws_df = filtered_df
             # Log only once; use tqdm.write to avoid breaking the outer tqdm bar in src/main.py:194
             if not _SUBSET_FILTER_LOGGED:
-                tqdm.write(f"[SUBSET] Chroma filter {before}->{len(laws_df)} rows by allowed_keys ({len(allowed_keys)} keep)")
+                tqdm.write(f"[SUBSET] Chroma filter {before}->{laws_df.height} rows by allowed_keys ({len(allowed_keys)} keep)")
                 _SUBSET_FILTER_LOGGED = True
 
     from src.utils.encoder.biencoder_utils import load_chromaDB_byname
@@ -218,7 +221,7 @@ def binary_retriever(model_path, laws_csv_path, chroma_db_name, article_to_check
         idx = 0
         all_articles = []
 
-        for _, row in tqdm(laws_df.iterrows()):
+        for row in tqdm(laws_df.iter_rows(named=True)):
             article = row["contents"]
             if case_augmentation_method == "caseaug":
                 case = generate_case(None, None, article)

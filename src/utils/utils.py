@@ -89,12 +89,12 @@ def load_jsonl_early(jsonl_path, ratio=None, seed=42, label_key="answer"):
 
 
 def load_dataframe_early(jsonl_path, ratio=None, seed=42, label_col="answer"):
-    """Early-load for DataFrame (finetune.py): wrapper around load_jsonl_early -> pd.DataFrame."""
-    import pandas as _pd
+    """Early-load for DataFrame (finetune.py): wrapper around load_jsonl_early -> pl.DataFrame."""
+    import polars as _pl
     rows, total = load_jsonl_early(jsonl_path, ratio=ratio, seed=seed, label_key=label_col)
     if not rows:
-        return _pd.DataFrame(rows), total
-    df = _pd.DataFrame(rows)
+        return _pl.DataFrame([]), total
+    df = _pl.DataFrame(rows)
     return df, total
 
 import os

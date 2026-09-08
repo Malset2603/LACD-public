@@ -1,6 +1,6 @@
 
 
-import pandas as pd
+import polars as pl
 import torch
 from torch.utils.data import Dataset
 import numpy as np
@@ -71,26 +71,36 @@ class NLIDataset(Dataset):
 
     
     def __len__(self):
-        return len(self.dataframe)
+        # Polars DataFrame has height, pandas has len
+        return self.dataframe.height if hasattr(self.dataframe, "height") else len(self.dataframe)
     
+    def _get_row(self, index):
+        # Support both Polars and pandas
+        if hasattr(self.dataframe, "row"):
+            # Polars
+            return self.dataframe.row(index, named=True)
+        else:
+            return self.dataframe.iloc[index]
+
     def __getitem__(self, index):
 
+        row = self._get_row(index)
         if self.method =="case-augmentation":
             from src.methods.case_augmentation.prompt import generate_case
-            premise = self.dataframe.iloc[index]["article1"] + "\ncase:\n"+ generate_case(None, None, self.dataframe.iloc[index]["article1"])
-            hypothesis = self.dataframe.iloc[index]["article2"]+"\ncase:\n"+ generate_case(None, None, self.dataframe.iloc[index]["article2"], case_idx=self.dataframe.iloc[index]['case_idx'])
+            premise = row["article1"] + "\ncase:\n"+ generate_case(None, None, row["article1"])
+            hypothesis = row["article2"]+"\ncase:\n"+ generate_case(None, None, row["article2"], case_idx=row.get('case_idx', 0))
         
         elif self.method == "case-concat-augmentation":
             from src.methods.case_augmentation.prompt import generate_case
-            article_key = article_key_function(self.dataframe.iloc[index]["article1"])+"-"+article_key_function(self.dataframe.iloc[index]["article2"])
-            premise = self.dataframe.iloc[index]["article1"]
-            hypothesis = "case:\n"+ generate_case(None,None, article=self.dataframe.iloc[index]["article1"], article_key=article_key) +"\n" + self.dataframe.iloc[index]["article2"]
+            article_key = article_key_function(row["article1"])+"-"+article_key_function(row["article2"])
+            premise = row["article1"]
+            hypothesis = "case:\n"+ generate_case(None,None, article=row["article1"], article_key=article_key) +"\n" + row["article2"]
 
         # baseline   
         else:
-            premise = self.dataframe.iloc[index]["article1"]
-            hypothesis = self.dataframe.iloc[index]["article2"]
-        label = self.dataframe.iloc[index]["answer"]
+            premise = row["article1"]
+            hypothesis = row["article2"]
+        label = row["answer"]
         label = 1 if label else 0  # True -> 1, False -> 0
         
         encoding = self.tokenizer.encode_plus(
@@ -110,7 +120,12 @@ class NLIDataset(Dataset):
         }
 
     def print_label_counts(self):
-        true_count = (self.dataframe["answer"] == True).sum()
-        false_count = (self.dataframe["answer"] == False).sum()
+        if hasattr(self.dataframe, "filter"):
+            # Polars
+            true_count = self.dataframe.filter(pl.col("answer") == True).height
+            false_count = self.dataframe.filter(pl.col("answer") == False).height
+        else:
+            true_count = (self.dataframe["answer"] == True).sum()
+            false_count = (self.dataframe["answer"] == False).sum()
         print(f"True labels: {true_count}")
         print(f"False labels: {false_count}")

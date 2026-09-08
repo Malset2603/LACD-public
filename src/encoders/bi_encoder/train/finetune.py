@@ -1,6 +1,6 @@
 # Bi-encoder NLI model using cosine similarity, adjusted for LACD-bi with the specified compute_metrics function.
 
-import pandas as pd
+import polars as pl
 from transformers import AutoTokenizer
 from transformers import Trainer, TrainingArguments
 import torch
@@ -88,12 +88,15 @@ if __name__ == "__main__":
         train_df, orig_train = load_dataframe_early('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl', ratio=args.subset_ratio, seed=args.subset_seed, label_col="answer")
         val_df, orig_val = load_dataframe_early('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl', ratio=args.subset_ratio, seed=args.subset_seed, label_col="answer")
         test_df, orig_test = load_dataframe_early('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl', ratio=args.subset_ratio, seed=args.subset_seed, label_col="answer")
-        print(f"[SUBSET] early-load ratio={args.subset_ratio} seed={args.subset_seed} -> train {orig_train}->{len(train_df)} val {orig_val}->{len(val_df)} test {orig_test}->{len(test_df)} (stratified)")
-        print(f"[SUBSET] train pos {train_df['answer'].sum()}/{len(train_df)} ({train_df['answer'].mean():.1%}), val {val_df['answer'].sum()}/{len(val_df)} ({val_df['answer'].mean():.1%})")
+        # Polars: height and sum
+        train_pos = train_df.filter(pl.col("answer") == True).height
+        val_pos = val_df.filter(pl.col("answer") == True).height
+        print(f"[SUBSET] early-load ratio={args.subset_ratio} seed={args.subset_seed} -> train {orig_train}->{train_df.height} val {orig_val}->{val_df.height} test {orig_test}->{test_df.height} (stratified)")
+        print(f"[SUBSET] train pos {train_pos}/{train_df.height} ({train_pos/train_df.height:.1%} if train_df.height else 0), val {val_pos}/{val_df.height} ({val_pos/val_df.height:.1%} if val_df.height else 0)")
     else:
-        train_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl', lines=True)
-        test_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl', lines=True)
-        val_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl', lines=True)
+        train_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl')
+        test_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl')
+        val_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl')
 
     if args.debug:
         print(f"[DEBUG] limiting datasets to {args.debug_limit} samples per split, epoch=1")
@@ -105,21 +108,21 @@ if __name__ == "__main__":
 
 
     # Add 'case_idx' column to DataFrames
-    train_df["case_idx"] = 0
-    test_df["case_idx"] = 0
-    val_df["case_idx"] = 0
+    train_df = train_df.with_columns(pl.lit(0).alias("case_idx"))
+    test_df = test_df.with_columns(pl.lit(0).alias("case_idx"))
+    val_df = val_df.with_columns(pl.lit(0).alias("case_idx"))
 
-    original_train_df = train_df.copy()
+    original_train_df = train_df.clone()
     if "case" in args.method and case_multiplier > 1:
         for i in range(1, case_multiplier):
-            temp_df = original_train_df.copy()
-            temp_df["case_idx"] = i
-            train_df = pd.concat([train_df, temp_df], ignore_index=True)
+            temp_df = original_train_df.clone().with_columns(pl.lit(i).alias("case_idx"))
+            train_df = pl.concat([train_df, temp_df], how="vertical")
 
     # Modify the NLIDataset to work with your data format
     class NLIDataset(Dataset):
         def __init__(self, dataframe, tokenizer, max_length, method):
-            self.dataframe = dataframe.reset_index(drop=True)
+            # dataframe is Polars; no need to reset index
+            self.dataframe = dataframe
             self.tokenizer = tokenizer
             self.max_length = max_length
             self.method = method
@@ -127,25 +130,30 @@ if __name__ == "__main__":
             self.label_map = {True: 1, False: 0}
 
         def __len__(self):
-            return len(self.dataframe)
+            return self.dataframe.height
+
+        def _get_row(self, index):
+            # Polars row as dict
+            return self.dataframe.row(index, named=True)
 
         def __getitem__(self, index):
+            row = self._get_row(index)
             if self.method =="case-augmentation":
                 from src.methods.case_augmentation.prompt import generate_case
-                premise = self.dataframe.iloc[index]["article1"] + "\ncase:\n"+ generate_case(None, None, self.dataframe.iloc[index]["article1"])
-                hypothesis = self.dataframe.iloc[index]["article2"]+"\ncase:\n"+ generate_case(None, None, self.dataframe.iloc[index]["article2"], case_idx=self.dataframe.iloc[index]['case_idx'])
+                premise = row["article1"] + "\ncase:\n"+ generate_case(None, None, row["article1"])
+                hypothesis = row["article2"]+"\ncase:\n"+ generate_case(None, None, row["article2"], case_idx=row['case_idx'])
             
             elif self.method == "case-concat-augmentation":
                 from src.methods.case_augmentation.prompt import generate_case
-                article_key = article_key_function(self.dataframe.iloc[index]["article1"])+"-"+article_key_function(self.dataframe.iloc[index]["article2"])
-                premise = self.dataframe.iloc[index]["article1"]
-                hypothesis = "case:\n"+ generate_case(None, None, self.dataframe.iloc[index]["article1"], article_key=article_key) +"\n" + self.dataframe.iloc[index]["article2"]
+                article_key = article_key_function(row["article1"])+"-"+article_key_function(row["article2"])
+                premise = row["article1"]
+                hypothesis = "case:\n"+ generate_case(None, None, row["article1"], article_key=article_key) +"\n" + row["article2"]
 
             # baseline   
             else:
-                premise = self.dataframe.iloc[index]["article1"]
-                hypothesis = self.dataframe.iloc[index]["article2"]
-            label = self.dataframe.iloc[index]["answer"]
+                premise = row["article1"]
+                hypothesis = row["article2"]
+            label = row["answer"]
             label = 1 if label else 0  # True -> 1, False -> 0
 
             encoding_a = self.tokenizer.encode_plus(
@@ -175,7 +183,13 @@ if __name__ == "__main__":
             return item
 
         def print_label_counts(self):
-            label_counts = self.dataframe["answer"].value_counts().to_dict()
+            vc = self.dataframe["answer"].value_counts()
+            # Polars value_counts returns DataFrame with column 'answer' and 'count'
+            if hasattr(vc, "to_dict"):
+                # pandas fallback
+                label_counts = vc.to_dict()
+            else:
+                label_counts = {row["answer"]: row["count"] for row in vc.iter_rows(named=True)}
             print(f"Label distribution: {label_counts}")
 
     # use --max_length if provided, fallback to original constant

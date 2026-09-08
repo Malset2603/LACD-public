@@ -144,6 +144,7 @@ outlines==0.0.34
 overrides==7.7.0
 packaging==23.2
 pandas==2.2.0
+polars==1.12.0
 parso==0.8.3
 peft==0.12.0
 pexpect==4.9.0

@@ -45,7 +45,7 @@ Case:
 """
 
 import openai
-import pandas as pd
+import polars as pl
 from tqdm import tqdm
 import json
 
@@ -56,10 +56,13 @@ def case_cache_start(cache_path= "./data/database/generated_case_cache/prompt-ba
 
         # Load the cache DataFrame
     try:
-        cache_df = pd.read_json(cache_path, lines=True)
-    except ValueError:
+        cache_df = pl.read_ndjson(cache_path)
+        # Ensure required columns exist
+        if "article" not in cache_df.columns:
+            cache_df = pl.DataFrame(schema={"article": pl.Utf8, "case": pl.Utf8, "article_key": pl.Utf8})
+    except Exception:
         # If the cache file is empty or doesn't exist, create an empty DataFrame
-        cache_df = pd.DataFrame(columns=["article", "case"])
+        cache_df = pl.DataFrame(schema={"article": pl.Utf8, "case": pl.Utf8, "article_key": pl.Utf8})
 
     # return cache_df
 
@@ -67,7 +70,7 @@ def case_cache_end(cache_path = "./data/database/generated_case_cache/prompt-bas
     global cache_df
    
     # Save the updated cache DataFrame back to the file
-    cache_df.to_json(cache_path, lines=True, orient="records", force_ascii=False)
+    cache_df.write_ndjson(cache_path)
 
 
 def generate_case(model, client, article: str, use_case_cache=True, article_key=None, case_idx = 0) -> str:
@@ -81,15 +84,14 @@ def generate_case(model, client, article: str, use_case_cache=True, article_key=
 
         if "-" in article_key:
             alter_article_key = article_key.split("-")[1]+"-"+article_key.split("-")[0]
-        
-            matching_rows = cache_df[(cache_df["article_key"] == article_key) | (cache_df["article_key"] == alter_article_key)]
+            matching_rows = cache_df.filter((pl.col("article_key") == article_key) | (pl.col("article_key") == alter_article_key))
         else:
-            matching_rows = cache_df[cache_df["article_key"] == article_key]
+            matching_rows = cache_df.filter(pl.col("article_key") == article_key)
 
         # 0은 아님.
-        if len(matching_rows) > case_idx:
+        if matching_rows.height > case_idx:
             # Return the cached case if a match is found
-            return matching_rows.iloc[case_idx]["case"]
+            return matching_rows.row(case_idx, named=True)["case"]
         else:
             # 이러면 Generate
             pass
@@ -109,8 +111,8 @@ def generate_case(model, client, article: str, use_case_cache=True, article_key=
 
     if use_case_cache:
         # Append the new article and generated case to the cache DataFrame
-        new_entry = pd.DataFrame([{"article": article, "case": generated_case_text, "article_key": article_key}])
-        cache_df = pd.concat([cache_df, new_entry], ignore_index=True)
+        new_entry = pl.DataFrame([{"article": article, "case": generated_case_text, "article_key": article_key}])
+        cache_df = pl.concat([cache_df, new_entry], how="vertical")
 
         
     return generated_case_text
@@ -118,7 +120,7 @@ def generate_case(model, client, article: str, use_case_cache=True, article_key=
 # 전체 case-cache 를 generation 하는 코드
 if __name__ == "__main__":
     import argparse
-    import pandas as pd
+    import polars as pl
     import json
     from tqdm import tqdm
     import numpy as np
@@ -137,7 +139,7 @@ if __name__ == "__main__":
     else:
         case_cache_path = "./data/database/generated_case_cache/prompt-base-full-law/case_cache_{}.jsonl".format(args.machine_num)
 
-    buffer_df = pd.DataFrame(columns=["article", "case", "article_key"])
+    buffer_df = pl.DataFrame(schema={"article": pl.Utf8, "case": pl.Utf8, "article_key": pl.Utf8})
 
     # model_path = "Qwen/Qwen2-7B-Instruct"
     # model_path = "/mnt/disk1/anseon2001/transformers-cache/models--Qwen--Qwen2-72B-Instruct/snapshots/fddbbd7b69a1fd7cf9b659203b37ae3eb89059e1"
@@ -156,48 +158,46 @@ if __name__ == "__main__":
 
     # 모든 cache 를 다운로드
     laws_csv = "./data/database/laws.csv"
-    laws_df = pd.read_csv(laws_csv)
+    laws_df = pl.read_csv(laws_csv, infer_schema_length=10000)
 
     # 데이터프레임을 10등분
     num_splits = 10
-    split_dfs = np.array_split(laws_df, num_splits)
+    # Polars: split via slicing
+    chunk_size = (laws_df.height + num_splits - 1) // num_splits
+    split_dfs = [laws_df.slice(i * chunk_size, chunk_size) for i in range(num_splits)]
 
     # machine_num이 주어진 범위 내에 있는지 확인
     if args.machine_num < 0 or args.machine_num >= num_splits:
         raise ValueError(f"Invalid machine_num: {args.machine_num}. Must be between 0 and {num_splits-1}.")
 
     # machine_num에 해당하는 부분을 가져오기
-    laws_df = pd.DataFrame(split_dfs[args.machine_num])
+    laws_df = split_dfs[args.machine_num]
 
     idx = 0
 
-    print("laws_df len:{}".format(len(laws_df)))
+    print("laws_df len:{}".format(laws_df.height))
 
-    for _, row in tqdm(laws_df.iterrows()):
+    for row in tqdm(laws_df.iter_rows(named=True)):
         
         article = row['contents']
         # 캐싱하지 않음
         generated_case_text  = generate_case(model = model_path, client=client, article=article, use_case_cache=False)
         article_key_text = article_key_function(article)
-        new_entry = pd.DataFrame([{"article": article, "case": generated_case_text, "article_key": article_key_text}])
-        buffer_df = pd.concat([buffer_df, new_entry], ignore_index=True)
+        new_entry = pl.DataFrame([{"article": article, "case": generated_case_text, "article_key": article_key_text}])
+        buffer_df = pl.concat([buffer_df, new_entry], how="vertical")
 
         idx = idx + 1
 
         if idx % 1000 == 0:
             with open(case_cache_path, 'a', encoding="utf-8") as f:
-                for index, row in buffer_df.iterrows():
-                    # 행을 딕셔너리로 변환
-                    row_dict = row.to_dict()
+                for row_dict in buffer_df.iter_rows(named=True):
                     # json 문자열을 파일에 쓰기
                     f.write(json.dumps(row_dict, ensure_ascii=False) + '\n')
 
-            buffer_df.drop(buffer_df.index, inplace=True)
+            buffer_df = pl.DataFrame(schema={"article": pl.Utf8, "case": pl.Utf8, "article_key": pl.Utf8})
 
     # 남은 것 저장
     with open(case_cache_path, 'a', encoding="utf-8") as f:
-        for index, row in buffer_df.iterrows():
-            # 행을 딕셔너리로 변환
-            row_dict = row.to_dict()
+        for row_dict in buffer_df.iter_rows(named=True):
             # json 문자열을 파일에 쓰기
             f.write(json.dumps(row_dict, ensure_ascii=False) + '\n')
