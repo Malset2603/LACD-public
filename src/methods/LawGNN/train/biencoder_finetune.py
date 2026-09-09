@@ -53,6 +53,11 @@ if __name__ == "__main__":
     parser.add_argument("--method", type=str, help="cosine or linear", default="cosine")
     parser.add_argument("--chroma_db_name", type=str, required=True, help="Name of the Chroma DB where encodings will be stored")
     parser.add_argument("--gnn_method", type=str, help="Name of GNN method", default = "gcn")
+    # Phase 1a: loss selection for GNN bi-encoder (default keeps original GReX behavior)
+    parser.add_argument("--biencoder_loss", type=str, default="default", choices=["default", "bce", "infonce"],
+                        help="loss for GNN bi-encoder: 'default' (original GReX: CosineEmbeddingLoss for cosine, BCE for linear), 'bce', or 'infonce' (contrastive)")
+    parser.add_argument("--infonce_tau", type=float, default=0.05,
+                        help="temperature for InfoNCE (only when --biencoder_loss=infonce)")
  
     args = parser.parse_args()
 
@@ -107,16 +112,21 @@ if __name__ == "__main__":
 
     print("no_key_count: {}".format(no_key_count))
 
-    # GCN Bi-Encoder 모델 초기화 using dynamic embedding size
+    # GCN Bi-Encoder initialization using dynamic embedding size
+    # Pass loss configuration; default keeps original GReX behavior
     if gnn_method == "gcn":
-        model = GCNBiEncoder(in_channels=embedding_size, out_channels=embedding_size, method=method).to(device)
+        model = GCNBiEncoder(in_channels=embedding_size, out_channels=embedding_size, method=method,
+                             loss_type=args.biencoder_loss, infonce_tau=args.infonce_tau).to(device)
     elif gnn_method == "graphsage":
-        model = SAGEBiEncoder(in_channels=embedding_size, out_channels=embedding_size, method=method).to(device)
+        model = SAGEBiEncoder(in_channels=embedding_size, out_channels=embedding_size, method=method,
+                              loss_type=args.biencoder_loss, infonce_tau=args.infonce_tau).to(device)
     elif gnn_method == "gat":
-        model = GATv2BiEncoder(in_channels=embedding_size, out_channels=embedding_size, method=method).to(device)
+        model = GATv2BiEncoder(in_channels=embedding_size, out_channels=embedding_size, method=method,
+                               loss_type=args.biencoder_loss, infonce_tau=args.infonce_tau).to(device)
     else:
         print("improper GNN methods!")
         assert(0)
+    print(f"[INFO] GNN BiEncoder loss_type={args.biencoder_loss}, tau={args.infonce_tau} (default keeps original GReX)")
 
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 

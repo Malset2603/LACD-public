@@ -45,11 +45,20 @@ def article_key_function(text)->str:
 ### Bi-encoder train
 
 ```bash
-# Naïve Re2 bi-encoder
+# Naïve Re2 bi-encoder (original GReX loss: BCE on cosine)
 python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-baseline
 
 # Ours
 python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-caseaug --method case-augmentation
+
+# Phase 1a: InfoNCE with temperature (optional, default is original BCE)
+# --biencoder_loss {bce|infonce}  default: bce (original GReX)
+# --infonce_tau  temperature for InfoNCE, recommended 0.05 for K=50, P~0.12
+python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-infonce --biencoder_loss infonce --infonce_tau 0.05
+python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-infonce-tau07 --biencoder_loss infonce --infonce_tau 0.07
+
+# GNN bi-encoder (LawGNN) — same loss options
+python ./src/methods/LawGNN/train/biencoder_finetune.py --chroma_db_name kbb-baseline --gnn_method gat --biencoder_loss infonce --infonce_tau 0.05 --tag kbb-gat-infonce
 
 # Debug - 20 samples, 1 epoch, batch 1, 512 tokens, fp16 (fast smoke test, 2GB GPU)
 python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-baseline-debug --debug --debug_limit 20 --batch_size 1 --max_length 512 --fp16 --gradient_checkpointing
@@ -150,6 +159,9 @@ python run_pipeline.py --exp grex-full --epoch 3
 
 # With explicit metrics and custom output dir (auto-created, overwritten if exists)
 python run_pipeline.py --exp grex-10k --subset_laws 10000 --epoch 2 --max_length 512 --fp16 --output_dir ./outputs/grex-10k-gat
+
+# Phase 1a via pipeline — InfoNCE (default is original BCE)
+python run_pipeline.py --exp grex-infonce --subset_laws 10000 --epoch 2 --max_length 512 --fp16 --biencoder_loss infonce --infonce_tau 0.05
 
 # Rerun only retrieval + eval (e.g., after changing top_k)
 python run_pipeline.py --exp grex-10k --subset_laws 10000 --steps 4,5 --top_k 5

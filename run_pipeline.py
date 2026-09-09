@@ -74,6 +74,11 @@ def main():
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size")
     parser.add_argument("--fp16", action="store_true", help="Enable fp16")
     parser.add_argument("--top_k", type=int, default=10, help="Top-K for retrieval and eval")
+    # Phase 1a: bi-encoder loss selection (default keeps original GReX BCE)
+    parser.add_argument("--biencoder_loss", type=str, default="bce", choices=["bce", "infonce"],
+                        help="Loss for bi-encoder: 'bce' (original GReX, default) or 'infonce' (contrastive with temperature)")
+    parser.add_argument("--infonce_tau", type=float, default=0.05,
+                        help="Temperature for InfoNCE (only when --biencoder_loss=infonce, recommended 0.05)")
     parser.add_argument("--steps", type=str, default="all", help="Steps to run: 'all' or comma list like '1,2,3,4,5'")
     parser.add_argument("--dry_run", action="store_true", help="Print commands without executing")
     parser.add_argument("--force", action="store_true", help="Overwrite existing outputs (default: overwrite)")
@@ -119,6 +124,8 @@ def main():
             "--batch_size", str(args.batch_size),
             "--epoch", str(bi_epoch),
             "--metrics_output", metrics_bi,
+            "--biencoder_loss", args.biencoder_loss,
+            "--infonce_tau", str(args.infonce_tau),
         ] + subset_args()
         if args.fp16:
             cmd.append("--fp16")

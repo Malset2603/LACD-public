@@ -6,6 +6,8 @@ from transformers import Trainer, TrainingArguments
 import torch
 from torch.utils.data import Dataset
 import argparse
+import random
+from torch.utils.data import DataLoader, Sampler
 from torch.utils.tensorboard import SummaryWriter # type: ignore
 from src.utils.utils import article_key_function, seed_everything, SEED
 
@@ -36,6 +38,12 @@ if __name__ == "__main__":
 
     # biencoder method
     parser.add_argument("--biencoder_method",type=str,help="cosine or linear",default="cosine")
+
+    # Phase 1a: loss selection for bi-encoder (default is original GReX loss)
+    parser.add_argument("--biencoder_loss", type=str, default="bce", choices=["bce", "infonce"],
+                        help="loss function for bi-encoder: 'bce' (original GReX, default) or 'infonce' (contrastive with temperature)")
+    parser.add_argument("--infonce_tau", type=float, default=0.05,
+                        help="temperature for InfoNCE loss (only used when --biencoder_loss=infonce). Recommended 0.05 for K=50, P~0.12")
 
     # debug mode: limit samples & epoch for fast runs
     parser.add_argument("--debug", action="store_true", help="enable debug mode: use limited samples and 1 epoch")
@@ -70,7 +78,10 @@ if __name__ == "__main__":
     epoch = args.epoch
 
     # Initialize the bi-encoder model and tokenizer
-    model = BiEncoderModel(model_name, method=biencoder_method)
+    # Pass loss configuration so that --biencoder_loss defaults to original GReX behavior
+    model = BiEncoderModel(model_name, method=biencoder_method,
+                           loss_type=args.biencoder_loss, infonce_tau=args.infonce_tau)
+    print(f"[INFO] BiEncoder loss_type={args.biencoder_loss}, tau={args.infonce_tau} (default is original GReX BCE)")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.add_special_tokens({"pad_token": "[PAD]"})
     model.encoder.config.pad_token_id = tokenizer.pad_token_id
@@ -185,6 +196,72 @@ if __name__ == "__main__":
             label_counts = {row["answer"]: row["count"] for row in vc.iter_rows(named=True)}
             print(f"Label distribution: {label_counts}")
 
+    # Balanced batch sampler for InfoNCE: guarantees 25% positives per batch (1 pos + 3 neg for batch=4)
+    # This keeps InfoNCE pure without changing batch_size, so baseline remains comparable
+    class BalancedBatchSampler(Sampler):
+        def __init__(self, pos_indices, neg_indices, batch_size, seed=42):
+            self.pos_indices = pos_indices
+            self.neg_indices = neg_indices
+            self.batch_size = batch_size
+            self.seed = seed
+            # 25% positives per batch (at least 1)
+            self.num_pos = max(1, batch_size // 4)
+            self.num_neg = batch_size - self.num_pos
+            # Number of batches per epoch
+            self.num_batches = (len(pos_indices) + len(neg_indices)) // batch_size
+
+        def __iter__(self):
+            # Deterministic shuffling per epoch using seed
+            rng = random.Random(self.seed)
+            pos = self.pos_indices.copy()
+            neg = self.neg_indices.copy()
+            rng.shuffle(pos)
+            rng.shuffle(neg)
+            pos_ptr = 0
+            neg_ptr = 0
+            for _ in range(self.num_batches):
+                batch = []
+                for _ in range(self.num_pos):
+                    if pos_ptr >= len(pos):
+                        rng.shuffle(pos)
+                        pos_ptr = 0
+                    batch.append(pos[pos_ptr])
+                    pos_ptr += 1
+                for _ in range(self.num_neg):
+                    if neg_ptr >= len(neg):
+                        rng.shuffle(neg)
+                        neg_ptr = 0
+                    batch.append(neg[neg_ptr])
+                    neg_ptr += 1
+                rng.shuffle(batch)
+                yield batch
+
+        def __len__(self):
+            return self.num_batches
+
+    class BalancedTrainer(Trainer):
+        """Trainer that uses BalancedBatchSampler for InfoNCE to ensure each batch has positives."""
+        def __init__(self, pos_indices, neg_indices, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.pos_indices = pos_indices
+            self.neg_indices = neg_indices
+
+        def get_train_dataloader(self):
+            if self.train_dataset is None:
+                raise ValueError("Trainer: training requires a train_dataset.")
+            batch_size = self.args.per_device_train_batch_size
+            # Create balanced batch sampler with 25% positives
+            batch_sampler = BalancedBatchSampler(
+                self.pos_indices, self.neg_indices, batch_size, seed=SEED
+            )
+            return DataLoader(
+                self.train_dataset,
+                batch_sampler=batch_sampler,
+                collate_fn=self.data_collator,
+                num_workers=self.args.dataloader_num_workers,
+                pin_memory=self.args.dataloader_pin_memory,
+            )
+
     # use --max_length if provided, fallback to original constant
     effective_max_length = args.max_length if args.max_length else MAX_TOKEN_LENGTH
     if args.debug and args.max_length == 4096:
@@ -247,15 +324,40 @@ if __name__ == "__main__":
             }
             return batch
 
-        trainer = Trainer(
-            model=model,  # the bi-encoder model
-            args=training_args,
-            train_dataset=train_dataset,
-            eval_dataset=val_dataset,
-            data_collator=data_collator,
-            compute_metrics=compute_metrics,
-            callbacks=[TensorBoardCallback(writer)],
-        )
+        # Use balanced batches for InfoNCE to guarantee 25% positives per batch
+        # Keeps experiment pure and batch_size unchanged so baseline remains comparable
+        if args.biencoder_loss == 'infonce':
+            # Build index lists from the Polars dataframe backing the dataset
+            # (train_df is still in scope and corresponds 1-to-1 with train_dataset)
+            pos_indices = []
+            neg_indices = []
+            for idx, row in enumerate(train_df.iter_rows(named=True)):
+                if row["answer"]:
+                    pos_indices.append(idx)
+                else:
+                    neg_indices.append(idx)
+            print(f"[INFO] Balanced sampler for InfoNCE: {len(pos_indices)} pos, {len(neg_indices)} neg "
+                  f"-> {max(1, args.batch_size//4)}/{args.batch_size} per batch (25%)")
+            trainer = BalancedTrainer(
+                pos_indices, neg_indices,
+                model=model,
+                args=training_args,
+                train_dataset=train_dataset,
+                eval_dataset=val_dataset,
+                data_collator=data_collator,
+                compute_metrics=compute_metrics,
+                callbacks=[TensorBoardCallback(writer)],
+            )
+        else:
+            trainer = Trainer(
+                model=model,  # the bi-encoder model
+                args=training_args,
+                train_dataset=train_dataset,
+                eval_dataset=val_dataset,
+                data_collator=data_collator,
+                compute_metrics=compute_metrics,
+                callbacks=[TensorBoardCallback(writer)],
+            )
 
         trainer.train()
 

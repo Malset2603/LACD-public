@@ -6,12 +6,17 @@ from transformers.modeling_outputs import SequenceClassifierOutput
 
 # GCN architecture for Bi-Encoder
 class GCNBiEncoder(torch.nn.Module):
-    def __init__(self, in_channels, out_channels, method='cosine'):
+    def __init__(self, in_channels, out_channels, method='cosine', loss_type='default', infonce_tau=0.05):
         super(GCNBiEncoder, self).__init__()
         self.conv1 = GCNConv(in_channels, 16)
         self.conv2 = GCNConv(16, out_channels)
         self.dropout = torch.nn.Dropout(0.1)
         self.method = method
+        # Loss type: 'default' = original GReX (CosineEmbeddingLoss for cosine, BCE for linear)
+        #            'bce'     = BCEWithLogitsLoss on cosine
+        #            'infonce' = InfoNCE with temperature tau (Phase 1a)
+        self.loss_type = loss_type
+        self.infonce_tau = infonce_tau
 
         if self.method == 'linear':
             self.classifier = torch.nn.Linear(out_channels * 2, 1)  # For concatenated representations
@@ -33,7 +38,27 @@ class GCNBiEncoder(torch.nn.Module):
 
         loss = None
         if labels is not None:
-            if self.method == 'cosine':
+            # Handle InfoNCE for cosine method (Phase 1a)
+            if self.loss_type == 'infonce' and self.method == 'cosine':
+                # In-batch contrastive: compare each query against all keys in the batch
+                emb_a = x[a_idx]  # [B, d]
+                emb_b = x[b_idx]  # [B, d]
+                norm_a = F.normalize(emb_a, p=2, dim=1)
+                norm_b = F.normalize(emb_b, p=2, dim=1)
+                sim_matrix = torch.matmul(norm_a, norm_b.T) / self.infonce_tau  # [B, B]
+                pos_mask = labels.view(-1) == 1
+                if pos_mask.any():
+                    pos_indices = torch.where(pos_mask)[0]
+                    logits_pos = sim_matrix[pos_mask]  # [P, B]
+                    loss_fct = torch.nn.CrossEntropyLoss()
+                    loss = loss_fct(logits_pos, pos_indices)
+                else:
+                    # Fallback to original loss to keep graph connected for fp16
+                    labels_for_loss = labels.float() * 2 - 1
+                    loss_fct = torch.nn.CosineEmbeddingLoss()
+                    loss = loss_fct(x[a_idx], x[b_idx], labels_for_loss)
+            elif self.method == 'cosine':
+                # Original GReX loss for GNN bi-encoder
                 # Adjust labels from {0,1} to {-1,1}
                 labels_for_loss = labels.float() * 2 - 1
                 loss_fct = torch.nn.CosineEmbeddingLoss()
@@ -52,12 +77,14 @@ class GCNBiEncoder(torch.nn.Module):
     
 # GraphSAGE architecture for Bi-Encoder
 class SAGEBiEncoder(torch.nn.Module):
-    def __init__(self, in_channels, out_channels, method='cosine'):
+    def __init__(self, in_channels, out_channels, method='cosine', loss_type='default', infonce_tau=0.05):
         super(SAGEBiEncoder, self).__init__()
         self.conv1 = SAGEConv(in_channels, 16)
         self.conv2 = SAGEConv(16, out_channels)
         self.dropout = torch.nn.Dropout(0.1)
         self.method = method
+        self.loss_type = loss_type
+        self.infonce_tau = infonce_tau
         
         if self.method == 'linear':
             self.classifier = torch.nn.Linear(out_channels * 2, 1)  # For concatenated representations
@@ -79,7 +106,23 @@ class SAGEBiEncoder(torch.nn.Module):
 
         loss = None
         if labels is not None:
-            if self.method == 'cosine':
+            if self.loss_type == 'infonce' and self.method == 'cosine':
+                emb_a = x[a_idx]
+                emb_b = x[b_idx]
+                norm_a = F.normalize(emb_a, p=2, dim=1)
+                norm_b = F.normalize(emb_b, p=2, dim=1)
+                sim_matrix = torch.matmul(norm_a, norm_b.T) / self.infonce_tau
+                pos_mask = labels.view(-1) == 1
+                if pos_mask.any():
+                    pos_indices = torch.where(pos_mask)[0]
+                    logits_pos = sim_matrix[pos_mask]
+                    loss_fct = torch.nn.CrossEntropyLoss()
+                    loss = loss_fct(logits_pos, pos_indices)
+                else:
+                    labels_for_loss = labels.float() * 2 - 1
+                    loss_fct = torch.nn.CosineEmbeddingLoss()
+                    loss = loss_fct(x[a_idx], x[b_idx], labels_for_loss)
+            elif self.method == 'cosine':
                 # Adjust labels from {0,1} to {-1,1}
                 labels_for_loss = labels.float() * 2 - 1
                 loss_fct = torch.nn.CosineEmbeddingLoss()
@@ -89,7 +132,7 @@ class SAGEBiEncoder(torch.nn.Module):
                 loss = loss_fct(logits, labels.float().unsqueeze(-1))
 
         return logits, loss
-    
+      
     def encode(self, x, edge_index):
         x = self.conv1(x, edge_index)
         x = F.relu(x)
@@ -98,12 +141,14 @@ class SAGEBiEncoder(torch.nn.Module):
     
 # GATv2 architecture for Bi-Encoder
 class GATv2BiEncoder(torch.nn.Module):
-    def __init__(self, in_channels, out_channels, heads=8, method='cosine'):
+    def __init__(self, in_channels, out_channels, heads=8, method='cosine', loss_type='default', infonce_tau=0.05):
         super(GATv2BiEncoder, self).__init__()
         self.conv1 = GATv2Conv(in_channels, 16, heads=heads)
         self.conv2 = GATv2Conv(16 * heads, out_channels, heads=1)
         self.dropout = torch.nn.Dropout(0.1)
         self.method = method
+        self.loss_type = loss_type
+        self.infonce_tau = infonce_tau
         
         
         if self.method == 'linear':
@@ -126,7 +171,23 @@ class GATv2BiEncoder(torch.nn.Module):
 
         loss = None
         if labels is not None:
-            if self.method == 'cosine':
+            if self.loss_type == 'infonce' and self.method == 'cosine':
+                emb_a = x[a_idx]
+                emb_b = x[b_idx]
+                norm_a = F.normalize(emb_a, p=2, dim=1)
+                norm_b = F.normalize(emb_b, p=2, dim=1)
+                sim_matrix = torch.matmul(norm_a, norm_b.T) / self.infonce_tau
+                pos_mask = labels.view(-1) == 1
+                if pos_mask.any():
+                    pos_indices = torch.where(pos_mask)[0]
+                    logits_pos = sim_matrix[pos_mask]
+                    loss_fct = torch.nn.CrossEntropyLoss()
+                    loss = loss_fct(logits_pos, pos_indices)
+                else:
+                    labels_for_loss = labels.float() * 2 - 1
+                    loss_fct = torch.nn.CosineEmbeddingLoss()
+                    loss = loss_fct(x[a_idx], x[b_idx], labels_for_loss)
+            elif self.method == 'cosine':
                 # Adjust labels from {0,1} to {-1,1}
                 labels_for_loss = labels.float() * 2 - 1
                 loss_fct = torch.nn.CosineEmbeddingLoss()
@@ -136,7 +197,7 @@ class GATv2BiEncoder(torch.nn.Module):
                 loss = loss_fct(logits, labels.float().unsqueeze(-1))
 
         return logits, loss
-    
+      
     def encode(self, x, edge_index):
         x = self.conv1(x, edge_index)
         x = F.relu(x)
