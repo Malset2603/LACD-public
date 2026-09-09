@@ -163,7 +163,11 @@ def compute_metrics(p):
     recall = recall_score(labels, pred)
     
     # ROC AUC calculation using probabilities for the positive class
-    roc_auc = roc_auc_score(labels, pred_proba.flatten())
+    # Handle single-class case (e.g., debug with 5 samples) where ROC AUC is undefined
+    try:
+        roc_auc = roc_auc_score(labels, pred_proba.flatten())
+    except ValueError:
+        roc_auc = 0.5
     
     return {
         "accuracy": accuracy,

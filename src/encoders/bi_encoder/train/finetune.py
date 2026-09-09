@@ -111,7 +111,6 @@ if __name__ == "__main__":
     train_df = train_df.with_columns(pl.lit(0).alias("case_idx"))
     test_df = test_df.with_columns(pl.lit(0).alias("case_idx"))
     val_df = val_df.with_columns(pl.lit(0).alias("case_idx"))
-
     original_train_df = train_df.clone()
     if "case" in args.method and case_multiplier > 1:
         for i in range(1, case_multiplier):
@@ -133,7 +132,6 @@ if __name__ == "__main__":
             return self.dataframe.height
 
         def _get_row(self, index):
-            # Polars row as dict
             return self.dataframe.row(index, named=True)
 
         def __getitem__(self, index):
@@ -184,12 +182,7 @@ if __name__ == "__main__":
 
         def print_label_counts(self):
             vc = self.dataframe["answer"].value_counts()
-            # Polars value_counts returns DataFrame with column 'answer' and 'count'
-            if hasattr(vc, "to_dict"):
-                # pandas fallback
-                label_counts = vc.to_dict()
-            else:
-                label_counts = {row["answer"]: row["count"] for row in vc.iter_rows(named=True)}
+            label_counts = {row["answer"]: row["count"] for row in vc.iter_rows(named=True)}
             print(f"Label distribution: {label_counts}")
 
     # use --max_length if provided, fallback to original constant

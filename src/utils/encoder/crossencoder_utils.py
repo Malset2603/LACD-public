@@ -71,16 +71,10 @@ class NLIDataset(Dataset):
 
     
     def __len__(self):
-        # Polars DataFrame has height, pandas has len
-        return self.dataframe.height if hasattr(self.dataframe, "height") else len(self.dataframe)
+        return self.dataframe.height
     
     def _get_row(self, index):
-        # Support both Polars and pandas
-        if hasattr(self.dataframe, "row"):
-            # Polars
-            return self.dataframe.row(index, named=True)
-        else:
-            return self.dataframe.iloc[index]
+        return self.dataframe.row(index, named=True)
 
     def __getitem__(self, index):
 
@@ -120,12 +114,7 @@ class NLIDataset(Dataset):
         }
 
     def print_label_counts(self):
-        if hasattr(self.dataframe, "filter"):
-            # Polars
-            true_count = self.dataframe.filter(pl.col("answer") == True).height
-            false_count = self.dataframe.filter(pl.col("answer") == False).height
-        else:
-            true_count = (self.dataframe["answer"] == True).sum()
-            false_count = (self.dataframe["answer"] == False).sum()
+        true_count = self.dataframe.filter(pl.col("answer") == True).height
+        false_count = self.dataframe.filter(pl.col("answer") == False).height
         print(f"True labels: {true_count}")
         print(f"False labels: {false_count}")
