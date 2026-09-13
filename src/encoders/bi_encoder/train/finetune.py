@@ -85,9 +85,14 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.add_special_tokens({"pad_token": "[PAD]"})
     model.encoder.config.pad_token_id = tokenizer.pad_token_id
-    if args.gradient_checkpointing and hasattr(model.encoder, "gradient_checkpointing_enable"):
-        model.encoder.gradient_checkpointing_enable()
-        print("[INFO] gradient checkpointing enabled")
+    if args.gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):
+        # Pass use_reentrant=False to silence torch 2.5 warning and match recommended behavior
+        try:
+            model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        except TypeError:
+            # Fallback for older transformers that don't accept kwargs
+            model.encoder.gradient_checkpointing_enable()
+        print("[INFO] gradient checkpointing enabled (use_reentrant=False)")
 
     if args.method == "case-augmentation" or args.method == "case-concat-augmentation":
         from src.methods.case_augmentation.prompt import case_cache_start, case_cache_end
