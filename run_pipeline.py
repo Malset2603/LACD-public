@@ -68,11 +68,12 @@ def main():
     parser.add_argument("--subset_seed", type=int, default=42, help="Seed for subset sampling")
     parser.add_argument("--model", type=str, default="monologg/kobigbird-bert-base", help="Bi/cross encoder model")
     parser.add_argument("--gnn_method", type=str, default="gat", choices=["gcn", "graphsage", "gat", "vanilla", "gathybrid", "graphsagehybrid"], help="GNN method")
-    parser.add_argument("--epoch", type=int, default=3, help="Epochs for bi and cross training (cross uses this value, default 3 as in paper)")
+    parser.add_argument("--epoch", type=int, default=3, help="Epochs for bi and cross training (cross uses this value, the default value is 3)")
     parser.add_argument("--bi_epoch", type=int, default=None, help="Epochs for bi-encoder only (default: --epoch)")
     parser.add_argument("--max_length", type=int, default=4096, help="Max token length (default 4096 full, use 512 for mini VRAM)")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size")
     parser.add_argument("--fp16", action="store_true", help="Enable fp16")
+    parser.add_argument("--gradient_checkpointing", action="store_true", help="Enable gradient checkpointing to save VRAM")
     parser.add_argument("--top_k", type=int, default=10, help="Top-K for retrieval and eval")
     # Phase 1a: bi-encoder loss selection (default keeps original GReX BCE)
     parser.add_argument("--biencoder_loss", type=str, default="bce", choices=["bce", "infonce"],
@@ -129,6 +130,8 @@ def main():
         ] + subset_args()
         if args.fp16:
             cmd.append("--fp16")
+        if args.gradient_checkpointing:
+            cmd.append("--gradient_checkpointing")
         run_cmd(cmd, dry_run=args.dry_run)
 
     # Step 2: Build Chroma DB
