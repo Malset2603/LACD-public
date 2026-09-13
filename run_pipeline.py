@@ -38,7 +38,10 @@ def run_cmd(cmd, dry_run=False):
     print(f"\n[RUN] {' '.join(cmd)}")
     if dry_run:
         return 0
-    result = subprocess.run(cmd)
+    env = os.environ.copy()
+    # Ensure project root is on PYTHONPATH so `import src` works
+    env["PYTHONPATH"] = f"{os.getcwd()}:{env.get('PYTHONPATH','')}"
+    result = subprocess.run(cmd, env=env)
     if result.returncode != 0:
         print(f"[ERROR] command failed with exit code {result.returncode}: {' '.join(cmd)}", file=sys.stderr)
         sys.exit(result.returncode)
