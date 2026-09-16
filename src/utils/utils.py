@@ -1,10 +1,17 @@
 SEED = 42
+LACD_DATASET_PATH="./data/datasets/LACD-biclassification/train-test-divide/"
+LACD_DATASET_PATH="./data/datasets/LACD-biclassification/train-test-divide-refine/"
+# LACD_DATASET_PATH="./data/datasets/LACD-biclassification/train-test-divide-filter7/"
 
 def article_key_function(text)->str:
     import re
     
     # Regular expression to match "제O조(의O)"
-    text = text.replace("·", "ㆍ")
+    try:
+        text = text.replace("·", "ㆍ")
+    except:
+        print("text is:", text)
+        exit(0)
     match = re.search(r'제[\d]+조(?:의[\d]+)?', text)
     if match:
         return text[:match.end()]

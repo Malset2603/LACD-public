@@ -4,13 +4,14 @@ import tqdm
 import csv
 
 class ArticleNetwork:
-    def __init__(self, laws_path="./data/database/laws.csv", law_link_path = "./data/database/law_link_20240930_duplicate_eliminate.jsonl"):
+    def __init__(self, laws_path="./data/database/laws.csv", law_link_path = "./data/database/law_link_20240930_duplicate_eliminate.jsonl", edge_way = "both"):
         # Dictionary to store the network (adjacency list)
         self.article_network = {}
         # Dictionary to store the article key to index mapping
         self.article_key_to_idx = {}
         # List to store all article keys
         self.all_article_keys = []
+        self.edge_way = edge_way
         
         # Load all articles from laws_html.jsonl
         self._load_nodes(laws_path)
@@ -79,11 +80,21 @@ class ArticleNetwork:
                     if target in self.article_key_to_idx:
                         # Add source -> target
                         # 실험해볼 만한 것 역순으로 넣어야 전파가 된다.
-                        edge_index[1].append(self.article_key_to_idx[source])
-                        edge_index[0].append(self.article_key_to_idx[target])
+                        if self.edge_way == "both":
+
+                            edge_index[1].append(self.article_key_to_idx[source])
+                            edge_index[0].append(self.article_key_to_idx[target])
+                            
+                            edge_index[0].append(self.article_key_to_idx[source])
+                            edge_index[1].append(self.article_key_to_idx[target])
+                            
+                        elif self.edge_way == "forward":
+                            edge_index[0].append(self.article_key_to_idx[source])
+                            edge_index[1].append(self.article_key_to_idx[target])
                         
-                        edge_index[0].append(self.article_key_to_idx[source])
-                        edge_index[1].append(self.article_key_to_idx[target])                        
+                        elif self.edge_way == "backward":
+                            edge_index[1].append(self.article_key_to_idx[source])
+                            edge_index[0].append(self.article_key_to_idx[target])
                     else:
 
                         no_found_cnt += 1

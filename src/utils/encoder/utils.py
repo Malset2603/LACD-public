@@ -5,9 +5,42 @@ import torch
 from sklearn.metrics import roc_auc_score
 
 
-MAX_TOKEN_LENGTH = 4096
+# MAX_TOKEN_LENGTH = 4096
+MAX_TOKEN_LENGTH = 2048
+# MAX_TOKEN_LENGTH = 1024
+
+# MAX_TOKEN_LENGTH = 512
 
 import torch
+from torch.nn import BCEWithLogitsLoss
+
+
+# 클래스별 answer 값의 분포 확인 및 가중치 계산
+def get_class_weights(train_df):
+    answer_counts = train_df["answer"].value_counts().sort_index().to_numpy()
+
+    class_weights = 1.0 / answer_counts  # 반비례 가중치 계산
+    class_weights = class_weights / class_weights.sum()  # 정규화
+    print(class_weights)
+    return torch.tensor(class_weights, dtype=torch.float).to("cuda")  # GPU 적용
+
+# 가중치를 적용한 커스텀 Trainer
+from transformers import Trainer, TrainingArguments
+
+class CustomTrainer(Trainer):
+    def __init__(self, class_weights, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.class_weights = class_weights
+
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        labels = inputs.get("labels").float()  # BCEWithLogitsLoss는 float labels 필요
+        outputs = model(**inputs)
+        logits = outputs.get("logits").squeeze(-1)  # (batch_size, 1) → (batch_size,)
+
+        loss_fct = BCEWithLogitsLoss(pos_weight=self.class_weights[1])  # Binary classification에서 가중치 적용
+        loss = loss_fct(logits, labels)  # BCEWithLogitsLoss 적용
+
+        return (loss, outputs) if return_outputs else loss
 
 class ThreeLayerClassifier(torch.nn.Module):
     def __init__(self, input_size, hidden_size_1=512, hidden_size_2=256):

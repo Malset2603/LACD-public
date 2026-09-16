@@ -1,8 +1,8 @@
-# Legal Article Competition Detection (LACD)
+# Legal Article Conflict Detection (LACD)
 
-An official repository for *A Method for Detecting Legal Article Competition for Korean Criminal Law Using a Case-augmented Mention Graph* paper.
+An official repository for *GReX: A Graph Neural Network-based Rerank-then-Expand Method for Detecting Legal Article Conflict in Korean Criminal Law* paper.
 
-![github-image.v1.svg](./figs/github-image.v2.svg)
+![github-image.v1.svg](./figs/main-image.svg)
 
 ## Installation
 
@@ -14,21 +14,14 @@ conda activate lacd
 pip install -r requirements.txt
 ```
 
-Before you start, make sure your default python execution path is our base directory. You can change it by `export PYTHONPATH=.`
+Before you start, make sure your default python execution path is our base directory. To do this, you should execute `export PYTHONPATH=.` in each terminal.
 
-<!-- ### **Chroma DB**
-
-```bash
-pip install chromadb
-pip install chromadb-client
-``` -->
 
 ### **Law download**
 
-Please locate provided `/data/database` folder in `/data/database`.
-You can download it in [here](https://drive.google.com/file/d/1TcXfcGUlww9w6quWaSon3RYxqt_Q1Od9/view?usp=sharing).
+Please locate provided law corpus data in `/data`.
 
-### **Setting SEED value**
+### **Setting SEED value (optional)**
 
 You can change the seed value by changing following codes in `/src/utils/utils.py` file.
 
@@ -42,17 +35,14 @@ def article_key_function(text)->str:
 
 ## Train
 
-### Bi-encoder train
+### Bi-encoder prepare
 
 ```bash
-# Naïve Re2 bi-encoder
-python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-baseline
-
-# Ours
-python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --tag kbb-caseaug --method case-augmentation
+# Pretrained model
+python ./src/encoders/bi_encoder/train/finetune.py --model monologg/kobigbird-bert-base --mode train --epoch 0 --tag kbb-baseline-nofinetune
 ```
 
-The models are saved in `/data/models/LACD-bi`. 
+The model will be saved in `/data/models/LACD-bi/kbb-baseline-nofinetune`. 
 <!-- Alternatively, you can use provided model checkpoints. -->
 
 ### Build Chroma DB from scratch
@@ -61,73 +51,74 @@ By executing following codes, Chroma DBs are automatically built.
 
 ```bash
 # Naïve Re2 bi-encoder chroma DB (kbb-baseline)
-python ./src/main.py --biencoder_model_path ./data/models/LACD-bi/kbb-baseline --chroma_db_name kbb-baseline --biencoder_method baseline --retrieval_method bi-only
-
-# Ours bi-encoder chroma DB (kbb-caseaug)
-python ./src/main.py --biencoder_model_path ./data/models/LACD-bi/kbb-caseaug --chroma_db_name kbb-caseaug --biencoder_method caseaug --retrieval_method bi-only
+python ./src/main.py --biencoder_model_path ./data/models/LACD-bi/kbb-baseline-nofinetune --chroma_db_name kbb-baseline-nofinetune --retrieval_method retrieval
 ```
 
-Chroma DBs are saved in `/data/database/chroma_db`. Note that it takes amount of time. Alternatively, you can use provided Chroma DB file.
+Chroma DBs are saved in `/data/database/chroma_db`. Note that it takes amount of time (around ~20 minutes for eight Nvidia TITAN RTX GPUs).
 
-### Cross encoder train (Experiments for Step 3)
+### Cross encoder train
 
 ```bash
-# Naïve Re2 cross-encoder
-python ./src/main.py --biencoder_model_path ./data/models/LACD-bi/kbb-baseline --chroma_db_name kbb-baseline --biencoder_method baseline --retrieval_method bi-only
+# baseline (Re2) cross-encoder
+python ./src/encoders/cross_encoder/train/finetune-balanceWeight.py --mode train --tag roberta-0 --method baseline --model klue/roberta-base --epoch 10 
 
-# Ours
-python ./src/methods/LawGNN/train/crossencoder_finetune.py --tag kbb-baseline-gat-caseaugembds --gnn_method gat --chroma_db_name kbb-caseaug --case_augmentation_method baseline --epoch 3
+# Our LGNN cross-encoder
+python ./src/methods/LawGNN/train/crossencoder_finetune.py --mode train --model klue/roberta-base --tag roberta-gat-0 --gnn_method gat --epoch 10 --chroma_db_name kbb-baseline-nofinetune 
 ```
 
-Without `--model` option, our code trains `monologg/kobigbird-bert-base` (KoBigBird) model. After training, the models are saved in `/data/models/LACD-cross`. 
+Without `--model` option, our code trains `klue/roberta-base` model. After training, the models are saved in `/data/models/LACD-cross`.
+These codes are all provided in `/bash-files/cross-encoder/all-train.sh`. 
 <!-- Alternatively, you can use provided model checkpoints -->
 
-Alternatively, you can use the following code.
-```bash
-bash bash-files/cross-encoder/cross_train_seedset.sh
-```
+## Test
 
+### Main Results: retrieve competing articles in the LACD dataset
 
-## Inference
-
-### Retrieve competing articles (Experiments for all Steps)
-
-You can check the retrieval result by following code
+You can conduct main experiments by using following codes
 
 ```bash
-# Naïve Re2 retriever
-python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/qwen2-0.5-baseline --biencoder_model_path ./data/models/LACD-bi/kbb-baseline  --chroma_db_name kbb-baseline --retrieval_method hybrid --crossencoder_index_method none --crossencoder_method baseline --biencoder_method baseline
+# Re2 retriever
+python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/roberta-0 --retrieval_method re2 --crossencoder_index_method none --mode test-benchmark --biencoder_top_k 150 --output_path ./outputs/retrieval_results/article_key/re2-0.jsonl
 
-# CAM-Re2
-python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/gnns/kbb-baseline-gat-caseaugembds --biencoder_model_path ./data/models/LACD-bi/kbb-caseaug  --chroma_db_name kbb-caseaug --retrieval_method hybrid --crossencoder_index_method gat --crossencoder_method baseline --biencoder_method caseaug
+# GReX retriever
+python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/gnns/roberta-gat-0 --retrieval_method re2 --crossencoder_index_method gat  --rex_method rex2 --mode test-benchmark --output_path ./outputs/retrieval_results/article_key/grex-0.jsonl
 ```
 
-### Testing query processing time
+Alternatively, you can execute `/bash-files/retrieval/retrieve-benchmark.sh`
 
-You can check query processing time (One of Appendix experiments) by following code.
+You can evaluate results by following codes
+```bash
+# article post-processing
+python ./src/eval/data-key-refine.py --input_dir ./outputs/retrieval_results/article_key --output_dir ./outputs/retrieval_results/article_key
+
+python ./src/eval/retrieval_eval.py
+```
+
+### ReX by synthetic C
+
+To evaluate ReX using synthetic C, use following codes:
 
 ```bash
-bash ./bash-files/retrieval/qps-test.sh
+# Generate C using Re2
+python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/roberta-0 --retrieval_method re2 --crossencoder_index_method none --mode train-generate --biencoder_top_k 100 --output_path ./outputs/retrieval_results/generative-conflicts/re2-0
+
+# Generate C using GAT
+python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/gnns/roberta-gat-0 --retrieval_method re2 --crossencoder_index_method gat --mode train-generate --biencoder_top_k 100 --output_path ./outputs/retrieval_results/generative-conflicts/re2-gat-0
+
+# ReX using synthetic C
+python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/roberta-0 --retrieval_method re2 --crossencoder_index_method none  --rex_method rex2 --mode test-benchmark --output_path ./outputs/retrieval_results/article_key/re2-rex-train-generate-0 --rex_conflict train-generate
+
+# GReX using synthetic C
+python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/gnns/roberta-gat-0 --retrieval_method re2 --crossencoder_index_method gat  --rex_method rex2 --mode test-benchmark --output_path ./outputs/retrieval_results/article_key/grex-train-generate-0 --rex_conflict train-generate
 ```
 
-## Ablation studies
+### Other baselines in LACD
 
-
-### Step 3 experiment without cross encoder
-
-You can check CAM-Re2 without cross encoder by following code.
+You can conduct Rocchio-PRF experiments by following codes
 ```bash
-bash bash-files/cross-encoder/noLM-crossencoder_train.sh
+(lacd) /LACD$ python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/roberta-0 --retrieval_method re2 --crossencoder_index_method none  --rex_method rocchio --mode test-benchmark --output_path ./outputs/retrieval_results/article_key/rocchioprf_re2-0 --biencoder_top_k 150
+
+(lacd) /LACD$ python ./src/main.py --crossencoder_model_path ./data/models/LACD-cross/gnns/roberta-gat-0 --retrieval_method re2 --crossencoder_index_method gat  --rex_method rocchio --mode test-benchmark --output_path ./outputs/retrieval_results/article_key/rocchioprf_gat-0 --biencoder_top_k 150
 ```
 
-
-### GNN architectures comparison
-
-You can check alternative GNN architectures (GCN and GraphSAGE) for CAM-Re2 by following code.
-
-```bash
-python ./src/methods/LawGNN/train/crossencoder_finetune.py --tag kbb-baseline-gcn-caseaugembds --gnn_method gcn --chroma_db_name kbb-caseaug --case_augmentation_method baseline --epoch 3
-
-
-python ./src/methods/LawGNN/train/crossencoder_finetune.py --tag kbb-baseline-graphsage-caseaugembds --gnn_method graphsage --chroma_db_name kbb-caseaug --case_augmentation_method baseline --epoch 3
-```
+You can evaluate results using the code in the main experiment.

@@ -9,7 +9,7 @@ from tqdm import trange
 import json
 from src.methods.LawGNN.article_network.article_network import ArticleNetwork
 from src.methods.LawGNN.gnn_architecture import GCNBiEncoder, SAGEBiEncoder, GATv2BiEncoder
-from src.utils.utils import article_key_function, seed_everything, SEED
+from src.utils.utils import article_key_function, seed_everything, SEED, LACD_DATASET_PATH
 
 import os
 
@@ -45,7 +45,7 @@ def collate_fn(batch):
 
 # Example execution
 if __name__ == "__main__":
-    seed_everything(SEED)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", type=str, help="train or test", default="train")
     parser.add_argument("--model_save_path", type=str, help="a path for saving model", default="None")
@@ -53,8 +53,12 @@ if __name__ == "__main__":
     parser.add_argument("--method", type=str, help="cosine or linear", default="cosine")
     parser.add_argument("--chroma_db_name", type=str, required=True, help="Name of the Chroma DB where encodings will be stored")
     parser.add_argument("--gnn_method", type=str, help="Name of GNN method", default = "gcn")
- 
+    parser.add_argument("--seed",type=int,help="seed",default=42)
+
+
     args = parser.parse_args()
+
+    seed_everything(args.seed)
 
     chroma_db_name = args.chroma_db_name
     method = args.method
@@ -118,7 +122,7 @@ if __name__ == "__main__":
         print("improper GNN methods!")
         assert(0)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=5e-5)
 
     # vectors 만들기. tensor 로 만들어야 함.
     # Find the maximum node index in edge_index_tensor
@@ -136,9 +140,9 @@ if __name__ == "__main__":
     vector_tensor = torch.stack(vectors_list).to(device)
 
     # Load datasets
-    train_dataset = load_dataset('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl', article_network)
-    val_dataset = load_dataset('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl', article_network)
-    test_dataset = load_dataset('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl', article_network)
+    train_dataset = load_dataset(LACD_DATASET_PATH+'train.jsonl', article_network)
+    val_dataset = load_dataset(LACD_DATASET_PATH+'val.jsonl', article_network)
+    test_dataset = load_dataset(LACD_DATASET_PATH+'test.jsonl', article_network)
 
     batch_size = 128  # You can adjust the batch size as needed
 
@@ -148,7 +152,7 @@ if __name__ == "__main__":
 
     if args.mode == "train":
         print("Training...")
-        num_epochs = 30  # Adjust the number of epochs as needed
+        num_epochs = 3  # Adjust the number of epochs as needed
         best_val_f1 = 0.0
         best_model_state = None
         for epoch in trange(num_epochs):
@@ -184,7 +188,7 @@ if __name__ == "__main__":
                     all_val_labels.extend(labels.cpu().numpy())
 
             val_f1 = f1_score(all_val_labels, all_val_preds, average='weighted')
-            # print(f"Epoch {epoch+1}, Validation F1 Score: {val_f1:.4f}")
+            print(f"Epoch {epoch+1}, Validation F1 Score: {val_f1:.4f}")
 
             # Save the model if it has the best validation F1
             if val_f1 > best_val_f1:

@@ -1,123 +1,178 @@
+from src.methods.ReX.hybrid_result import build_true_dict, build_true_dict_by_test, compute_ndcg, classify_type
 import json
-
-from sympy import false, true
-from src.utils.utils import article_key_function
-import os
 from tqdm import tqdm
-if __name__ == "__main__":
-    
-    rows = []
-    top_k = 5
-    biencoder_top_k=10
+import copy
+import os
+from src.methods.LawGNN.article_network.article_network import ArticleNetwork
+from tabulate import tabulate
 
-    with open("./data/datasets/LACD-biclassification/checker-generated/raw_links_small.jsonl", 'r', encoding='utf-8') as file:
-        for line in file:
-            row = json.loads(line.strip())  # 각 줄을 JSON으로 파싱
-            rows.append(row)
+# ANSI escape codes
+BLUE_BOLD = '\033[1;34m'
+UNDERLINE = '\033[4m'
+RESET = '\033[0m'
 
-    with open("./data/datasets/LACD-retrieval/missed_pairs.jsonl", 'r', encoding='utf-8') as file:
-        for line in file:
-            row = json.loads(line.strip())  # 각 줄을 JSON으로 파싱
-            rows.append(row)
-
-
-    rows = [{"article1": article_key_function(r["article1"]), "article2": article_key_function(r["article2"]), "answer": r["answer"]} for r in rows]
-
-    missed_pairs = []
-    seen_pairs = set()  # 중복된 쌍을 확인하기 위한 set
-    for tags in ["baseline_none_baseline", "caseaug_none_baseline" ,"baseline_gat_baseline", "caseaug_gat_baseline"]:
-
-    # for tags in ["caseaug_gcn_caseaug"]:
-        print(f"==\ntags: {tags}")
-        
-        results = []
-
-        with open(f"./outputs/retrieval_results/biencoder-top-{biencoder_top_k}-qwen/{tags}.jsonl", 'r', encoding='utf-8') as result_file:
-            for line in result_file:
-                row = json.loads(line.strip())  # 각 줄을 JSON으로 파싱
-                results.append(row)
-
-        checked_articles = set()
-
-        true_positive = 0
-        false_positive = 0
-        blind_negative = 0
-        false_negative = 0
-        blind_positive = 0
-        count = 0
-
-        for result in results:
-            article_to_check = result['article_to_check']
-            
-            # 한번씩만 검증함
-            if article_to_check in checked_articles:
-                continue
-
-            checked_articles.add(article_to_check)
-
-            articles = result['articles']
-            articles = [a for a in articles if article_key_function(article_to_check) != article_key_function(a)]
-
-            if len(articles) == 0:
-                matching_rows = [r for r in rows if article_key_function(r["article1"]) == article_key_function(article_to_check) or article_key_function(r["article2"]) == article_key_function(article_to_check)]
-                
-                for r in matching_rows:
-                    # 하나라도 True 이면 잘못 대답한 것이므로 false
-                    if r['answer'] is True:
-                        false_negative = false_negative + 1
-                        break
-                
-                if r['answer'] is False:
-                    blind_negative = blind_negative + 1
-
+def highlight_table(table, header):
+    # table: List[List[str or float]]
+    # header: List[str]
+    # 각 column별로 float값만 추출
+    num_cols = len(header)
+    col_values = [[] for _ in range(num_cols)]
+    for row in table:
+        for i, val in enumerate(row):
+            try:
+                col_values[i].append(float(val))
+            except:
+                col_values[i].append(None)
+    # 각 col별로 최고, 두번째 값 인덱스 찾기 (0번은 모델명)
+    best_idx = [None] * num_cols
+    second_idx = [None] * num_cols
+    for j in range(1, num_cols):
+        vals = [(i, v) for i, v in enumerate(col_values[j]) if v is not None]
+        if not vals:
+            continue
+        vals_sorted = sorted(vals, key=lambda x: x[1], reverse=True)
+        if len(vals_sorted) > 0:
+            best_idx[j] = vals_sorted[0][0]
+        if len(vals_sorted) > 1:
+            second_idx[j] = vals_sorted[1][0]
+    # 스타일 적용
+    styled_table = []
+    for i, row in enumerate(table):
+        styled_row = []
+        for j, val in enumerate(row):
+            sval = str(val)
+            if j == 0:
+                styled_row.append(sval)
+            elif best_idx[j] == i:
+                styled_row.append(f"{BLUE_BOLD}{sval}{RESET}")
+            elif second_idx[j] == i:
+                styled_row.append(f"{UNDERLINE}{sval}{RESET}")
             else:
-                # print(article_key_function(article_to_check), [article_key_function(a) for a in articles])
-                for a in articles[:top_k]:
-                    # rows 중에서 "article1"과 "article2"가 각각 article1, a로 일치하는 행을 찾음
-                    matching_rows = [r for r in rows if (article_key_function(r["article1"]) == article_key_function(article_to_check) and article_key_function(r["article2"]) == article_key_function(a)) or (article_key_function(r["article2"]) == article_key_function(article_to_check) and article_key_function(r["article1"]) == article_key_function(a))]
+                styled_row.append(sval)
+        styled_table.append(styled_row)
+    return styled_table
 
-                    # assert(len(matching_rows) < 2)
+def main(result_path, article_network):
+    top_k = [5, 10, 50]
+    top_k0 = [50]
 
-                    if len(matching_rows) == 0:
-                        pair = (article_key_function(article_to_check), article_key_function(a))
-                        reverse_pair = (pair[1], pair[0])
-                        
-                        # 중복 확인: pair가 이미 seen_pairs에 있는지 확인
-                        if pair not in seen_pairs and reverse_pair not in seen_pairs:
-                            missed_pairs.append({"article1": article_to_check, "article2": a, "answer": None})
-                            seen_pairs.add(pair)  # 새로운 쌍을 seen_pairs에 추가
-                            blind_positive += 1
+    true_dicts_with_known_conflicts = build_true_dict()
+    true_dicts = build_true_dict_by_test()
 
-                    # 매칭된 행들에 대해 row['answer']가 True 또는 False인지 확인하여 카운트
-                    elif matching_rows[0]['answer'] is True:
-                        true_positive += 1
+    # 결과 파일 읽기
+    processed_query = set()
 
-                    elif matching_rows[0]['answer'] is False:
-                        false_positive += 1
-                    else:
-                        # 아직 채점되지 않은것
-                        pass
-                        # assert(0)
+    results = []
+    with open(result_path, 'r', encoding='utf-8') as result_file:
+        for line in result_file:
+            row = json.loads(line.strip())
+            results.append(row)
+            processed_query.add(row['article_to_check'])
 
-        query_num = len(checked_articles)
+    all_positives = 0
+    for q in processed_query:
+        all_positives += len(true_dicts[q])
 
-        # 대답하지 않은 query 수
-        no_answer_query = blind_negative + false_negative
-        # 대답한 query 수
-        answer_query = query_num - no_answer_query
-        print(f"For {query_num} queries total, retriever answered {answer_query} of queries and did not answered {no_answer_query} of queries.")
-        print(f"For no_answer_query, false_negative: {false_negative}, blind_negative: {blind_negative}")
-        print(f"For answered query, true_positive: {true_positive}, false_positive: {false_positive}, blind_positive:{blind_positive}")
+    # metric 결과 저장용 딕셔너리
+    table_metrics = {k: {"nDCG": 0.0, "Recall": 0.0, "Retrieval F1": 0.0} for k in top_k}
 
-        precision = true_positive / (true_positive + false_positive) if (true_positive + false_positive) > 0 else 0
-        recall = true_positive / (true_positive + false_negative+blind_negative) if (true_positive + false_negative) > 0 else 0
-        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    for k0 in top_k0:
+        results_as_binary_markings = []
+        all_instances = 0
 
-        print(f"recall at {top_k}: {recall}")
-        print(f"precision at {top_k}: {precision}")
+        # 각 인스턴스(쿼리)에 대해 articles를 rerank하고 binary marking 계산
 
-    # 중복 없는 missed_pairs를 missed_pairs.jsonl로 저장
-    with open("missed_pairs.jsonl", 'w', encoding='utf-8') as outfile:
-        for pair in missed_pairs:
-            json.dump(pair, outfile, ensure_ascii=False)
-            outfile.write('\n')
+        true_articles_count = 0
+        for r in tqdm(results):
+            query = r["article_to_check"]
+            instance = {"article_to_check": query, "articles_as_binary": [], "articles_as_types": []}
+
+            true_articles = set(true_dicts.get(query, []))
+            true_articles_with_known_conflicts = set(true_dicts_with_known_conflicts.get(query, []))    
+
+            
+            true_articles_count += len(true_articles)
+            for a in r["articles"]:
+                if a in true_articles_with_known_conflicts and a not in true_articles:
+                    continue
+
+                instance["articles_as_binary"].append(1 if a in true_articles else 0)
+                instance["articles_as_types"].append(
+                    classify_type(query, a, article_network) if a in true_articles else "NONE"
+                )
+            all_instances += len(instance["articles_as_binary"])
+            results_as_binary_markings.append(instance)
+
+        print(f"True articles count: {true_articles_count}")
+        print(f"Average true articles count: {true_articles_count / len(results)}")
+        for k in top_k:
+            total_true_positives = 0
+            total_retrieved = 0
+            recall = 0
+            recall_cap = 0
+            total_ndcg = 0.0
+            possible_positives = 0
+
+            recall = 0
+            recall_cap = 0
+            for r in results_as_binary_markings:
+                binary_list = r["articles_as_binary"]
+                topk_list = binary_list[:k]
+                total_true_positives += sum(topk_list)
+                total_retrieved += len(topk_list)
+                recall += sum(topk_list) / len(true_dicts[r['article_to_check']])
+                recall_cap += sum(topk_list) / min(k, len(true_dicts[r['article_to_check']]))
+                total_ndcg += compute_ndcg(
+                    binary_list,
+                    [1 for i in range(len(true_dicts[r['article_to_check']]))] + [0 for j in range(k-len(true_dicts[r['article_to_check']]))],
+                    k
+                )
+
+            recall = recall / len(results_as_binary_markings) * 100
+            recall_cap = recall_cap / len(results_as_binary_markings) * 100
+            precision = (total_true_positives / total_retrieved * 100) if total_retrieved > 0 else 0.0
+            f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+            ndcg = total_ndcg / len(results_as_binary_markings) * 100
+
+            # 표용 metric 저장
+            table_metrics[k]["nDCG"] = ndcg
+            table_metrics[k]["Recall"] = recall
+            table_metrics[k]["Retrieval F1"] = f1
+
+    # 모델명 추출
+    model_name = os.path.basename(result_path).split(".")[0]
+    row = [model_name]
+    for metric in ["nDCG", "Recall", "Retrieval F1"]:
+        for k in [5, 10, 50]:
+            row.append(f"{table_metrics[k][metric]:.2f}")
+    return row
+
+if __name__ == "__main__":
+    import os
+    input_dir = "./outputs/retrieval_results/article_key/"
+    article_network = ArticleNetwork()
+
+    # 해당 디렉토리 내 모든 파일 경로를 리스트로 수집
+    paths = [
+        os.path.join(input_dir, f)
+        for f in os.listdir(input_dir)
+        if os.path.isfile(os.path.join(input_dir, f))
+    ]
+    paths.sort()
+
+    # 표 헤더
+    header = ["Model"] + [f"nDCG@{k}" for k in [5,10,50]] + [f"Recall@{k}" for k in [5,10,50]] + [f"F1@{k}" for k in [5,10,50]]
+    table = []
+    for p in paths:
+        try:
+            print(f"Processing: {p}")
+            row = main(p, article_network)
+            table.append(row)
+        except Exception as e:
+            print(f"Error processing {p}: {e}")
+            continue
+    print("-" * (len(header) * 15))
+    styled_table = highlight_table(table, header)
+    print(tabulate(styled_table, headers=header, tablefmt="github"))
+    print("-" * (len(header) * 15))
+    # print("===================================\n")

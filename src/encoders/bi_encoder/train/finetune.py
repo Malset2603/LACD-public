@@ -7,7 +7,7 @@ import torch
 from torch.utils.data import Dataset
 import argparse
 from torch.utils.tensorboard import SummaryWriter # type: ignore
-from src.utils.utils import article_key_function, seed_everything, SEED
+from src.utils.utils import article_key_function, seed_everything, SEED, LACD_DATASET_PATH
 
 from src.utils.encoder.biencoder_utils import (
     BiEncoderModel,
@@ -19,7 +19,6 @@ from src.utils.encoder.utils import MAX_TOKEN_LENGTH, TensorBoardCallback, compu
 
 
 if __name__ == "__main__":
-    seed_everything(SEED)
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="monologg/kobigbird-bert-base")
     parser.add_argument("--mode", type=str, help="train, test, or inference", default="train")
@@ -30,14 +29,18 @@ if __name__ == "__main__":
     parser.add_argument("--tag", type=str, help="tensorboard and output tag", default="None")
 
     parser.add_argument("--case_multiplier", type=int, default=2)
-    parser.add_argument("--epoch", type = int, default=3)
+    parser.add_argument("--epoch", type = int, default=5)
 
-    parser.add_argument("--method",type=str,help="baseline or case-augmentation or case-concat-augmentation",default="baseline",)
+    parser.add_argument("--method", type=str, help="baseline or case-augmentation or case-concat-augmentation or rule-augmentation", default="baseline")
 
     # biencoder method
     parser.add_argument("--biencoder_method",type=str,help="cosine or linear",default="cosine")
+    parser.add_argument("--seed",type=int,help="seed",default=42)
 
     args = parser.parse_args()
+
+    seed_everything(args.seed)
+
 
     case_multiplier = args.case_multiplier
     model_name = args.model
@@ -51,25 +54,38 @@ if __name__ == "__main__":
     tokenizer.add_special_tokens({"pad_token": "[PAD]"})
     model.encoder.config.pad_token_id = tokenizer.pad_token_id
 
-    if args.method == "case-augmentation" or args.method == "case-concat-augmentation":
-        from src.methods.case_augmentation.prompt import case_cache_start, case_cache_end
-        case_cache_start()
 
-    train_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl', lines=True)
-    test_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl', lines=True)
-    val_df = pd.read_json('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl', lines=True)
+    train_df = pd.read_json(LACD_DATASET_PATH+'train.jsonl', lines=True)
+    test_df = pd.read_json(LACD_DATASET_PATH+'test.jsonl', lines=True)
+    val_df = pd.read_json(LACD_DATASET_PATH+'val.jsonl', lines=True)
 
 
     # Add 'case_idx' column to DataFrames
-    train_df["case_idx"] = 0
-    test_df["case_idx"] = 0
-    val_df["case_idx"] = 0
+    if "case" in args.method:
+        train_df['case_idx'] = 0
+        test_df['case_idx'] = 0
+        val_df['case_idx'] = 0
+    if "rule" in args.method:
+        train_df['rule_idx'] = 0
+        test_df['rule_idx'] = 0
+        val_df['rule_idx'] = 0
+
 
     original_train_df = train_df.copy()
     if "case" in args.method and case_multiplier > 1:
         for i in range(1, case_multiplier):
             temp_df = original_train_df.copy()
             temp_df["case_idx"] = i
+            train_df = pd.concat([train_df, temp_df], ignore_index=True)
+
+    elif "rule" in args.method and case_multiplier > 1:
+        # 1부터 case_multiplier-1까지 반복
+        for i in range(1, case_multiplier):
+            # train_df를 복제
+            temp_df = original_train_df.copy()
+            # 복제한 데이터프레임의 'case_idx' 값을 i로 설정
+            temp_df['rule_idx'] = i
+            # 복제한 데이터프레임을 원래 데이터프레임에 붙여넣기
             train_df = pd.concat([train_df, temp_df], ignore_index=True)
 
     # Modify the NLIDataset to work with your data format
@@ -86,28 +102,16 @@ if __name__ == "__main__":
             return len(self.dataframe)
 
         def __getitem__(self, index):
-            if self.method =="case-augmentation":
-                from src.methods.case_augmentation.prompt import generate_case
-                premise = self.dataframe.iloc[index]["article1"] + "\ncase:\n"+ generate_case(None, None, self.dataframe.iloc[index]["article1"])
-                hypothesis = self.dataframe.iloc[index]["article2"]+"\ncase:\n"+ generate_case(None, None, self.dataframe.iloc[index]["article2"], case_idx=self.dataframe.iloc[index]['case_idx'])
-            
-            elif self.method == "case-concat-augmentation":
-                from src.methods.case_augmentation.prompt import generate_case
-                article_key = article_key_function(self.dataframe.iloc[index]["article1"])+"-"+article_key_function(self.dataframe.iloc[index]["article2"])
-                premise = self.dataframe.iloc[index]["article1"]
-                hypothesis = "case:\n"+ generate_case(None, None, self.dataframe.iloc[index]["article1"], article_key=article_key) +"\n" + self.dataframe.iloc[index]["article2"]
-
-            # baseline   
-            else:
-                premise = self.dataframe.iloc[index]["article1"]
-                hypothesis = self.dataframe.iloc[index]["article2"]
+            premise = self.dataframe.iloc[index]["article1"]
+            hypothesis = self.dataframe.iloc[index]["article2"]
             label = self.dataframe.iloc[index]["answer"]
             label = 1 if label else 0  # True -> 1, False -> 0
+            
 
             encoding_a = self.tokenizer.encode_plus(
                 text=premise,
                 add_special_tokens=True,
-                max_length=MAX_TOKEN_LENGTH,
+                max_length=self.max_length,
                 padding="max_length",
                 truncation=True,
                 return_tensors="pt",
@@ -115,7 +119,7 @@ if __name__ == "__main__":
             encoding_b = self.tokenizer.encode_plus(
                 text=hypothesis,
                 add_special_tokens=True,
-                max_length=MAX_TOKEN_LENGTH,
+                max_length=self.max_length,
                 padding="max_length",
                 truncation=True,
                 return_tensors="pt",
@@ -134,14 +138,17 @@ if __name__ == "__main__":
             label_counts = self.dataframe["answer"].value_counts().to_dict()
             print(f"Label distribution: {label_counts}")
 
+    max_length = min([MAX_TOKEN_LENGTH, tokenizer.model_max_length])
+
+    
     train_dataset = NLIDataset(
-        train_df, tokenizer, max_length=MAX_TOKEN_LENGTH, method=args.method
+        train_df, tokenizer, max_length=max_length, method=args.method
     )
     test_dataset = NLIDataset(
-        test_df, tokenizer, max_length=MAX_TOKEN_LENGTH, method=args.method
+        test_df, tokenizer, max_length=max_length, method=args.method
     )
     val_dataset = NLIDataset(
-        val_df, tokenizer, max_length=MAX_TOKEN_LENGTH, method=args.method
+        val_df, tokenizer, max_length=max_length, method=args.method
     )
 
     print(f"Token limit for {args.model}: {tokenizer.model_max_length}")
@@ -150,23 +157,21 @@ if __name__ == "__main__":
     # val_dataset.print_label_counts()
 
     training_args = TrainingArguments(
-        output_dir=f"./outputs/LACD-bi/small-fine-tune/{tag}",  # Replaced
-        num_train_epochs=epoch,
-        per_device_train_batch_size=4,
-        per_device_eval_batch_size=4,
-        warmup_steps=500,
-        weight_decay=0,
-        logging_dir=f"./outputs/LACD-bi/small-fine-tune/{tag}",  # Replaced
-        logging_steps=10,
-        eval_strategy="steps",
-        eval_steps=20,
-        save_strategy="steps",
-        save_steps=20,
-        save_total_limit=1,
-        load_best_model_at_end=True,
-        metric_for_best_model="eval_roc_auc",  # Use roc_auc as metric
-        greater_is_better=True,
-        report_to="tensorboard",
+        output_dir=f"./outputs/LACD-bi/small-fine-tune/{tag}",  # 모델 출력 경로
+        num_train_epochs=epoch,  # 전체 epoch 수
+        per_device_train_batch_size=4,  # 훈련 배치 크기
+        per_device_eval_batch_size=4,  # 평가 배치 크기
+        warmup_steps=500,  # Warmup 단계
+        weight_decay=0,  # Weight decay
+        logging_dir=f"./outputs/LACD-bi/small-fine-tune/{tag}",  # 로깅 경로
+        logging_steps=10,  # 로깅 간격
+        evaluation_strategy="epoch",  # 매 epoch마다 평가
+        save_strategy="epoch",  # 매 epoch마다 저장
+        save_total_limit=1,  # 저장 모델 수 제한
+        load_best_model_at_end=True,  # 최적 모델 로드
+        metric_for_best_model="eval_roc_auc",  # roc_auc를 최적화 지표로 사용
+        greater_is_better=True,  # 지표가 클수록 좋은 모델
+        report_to="tensorboard",  # TensorBoard로 로깅
     )
 
     
@@ -268,3 +273,5 @@ if __name__ == "__main__":
 
     if args.method == "case-augmentation" or args.method == "case-concat-augmentation":
         case_cache_end()
+    elif args.method == "rule-augmentation":
+        rule_cache_end()
