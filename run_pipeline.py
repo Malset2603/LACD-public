@@ -74,7 +74,8 @@ def main():
     parser.add_argument("--epoch", type=int, default=3, help="Epochs for bi and cross training (cross uses this value, the default value is 3)")
     parser.add_argument("--bi_epoch", type=int, default=None, help="Epochs for bi-encoder only (default: --epoch)")
     parser.add_argument("--max_length", type=int, default=4096, help="Max token length (default 4096 full, use 512 for mini VRAM)")
-    parser.add_argument("--batch_size", type=int, default=4, help="Batch size")
+    parser.add_argument("--batch_size", type=int, default=4, help="Batch size for training (default 4)")
+    parser.add_argument("--eval_batch_size", type=int, default=None, help="Batch size for Chroma DB build and retrieval/eval (default: same as --batch_size)")
     parser.add_argument("--fp16", action="store_true", help="Enable fp16")
     parser.add_argument("--gradient_checkpointing", action="store_true", help="Enable gradient checkpointing to save VRAM")
     parser.add_argument("--top_k", type=int, default=10, help="Top-K for retrieval and eval")
@@ -96,6 +97,7 @@ def main():
 
     args = parser.parse_args()
     steps = parse_steps(args.steps)
+    eval_batch_size = args.eval_batch_size if args.eval_batch_size is not None else args.batch_size
 
     # Derive consistent names
     bi_tag = args.bi_tag or f"kbb-{args.exp}"
@@ -111,7 +113,7 @@ def main():
     summary_path = os.path.join(output_dir, "summary.json")
 
     os.makedirs(output_dir, exist_ok=True)
-    print(f"[INFO] exp={args.exp} bi_tag={bi_tag} cross_tag={cross_tag} chroma={chroma_name} rex_method={args.rex_method} output_dir={output_dir} steps={sorted(steps)}")
+    print(f"[INFO] exp={args.exp} bi_tag={bi_tag} cross_tag={cross_tag} chroma={chroma_name} rex_method={args.rex_method} batch_size={args.batch_size} eval_batch_size={eval_batch_size} output_dir={output_dir} steps={sorted(steps)}")
 
     # Helper to build common subset args
     def subset_args():
@@ -151,6 +153,7 @@ def main():
             "--biencoder_model_path", f"./data/models/LACD-bi/{bi_tag}",
             "--chroma_db_name", chroma_name,
             "--retrieval_method", "retrieval",
+            "--batch_size", str(eval_batch_size),
         ] + subset_args()
         run_cmd(cmd, dry_run=args.dry_run)
 
@@ -163,6 +166,7 @@ def main():
             "--chroma_db_name", chroma_name,
             "--case_augmentation_method", "baseline",
             "--epoch", str(args.epoch),
+            "--batch_size", str(args.batch_size),
             "--max_length", str(args.max_length),
             "--metrics_output", metrics_cross,
         ] + subset_args()
@@ -184,6 +188,7 @@ def main():
             "--gnn_edge_way", args.gnn_edge_way,
             "--mode", "test-benchmark",
             "--output_dir", output_dir,
+            "--batch_size", str(eval_batch_size),
             "--biencoder_top_k", str(args.top_k),
         ] + subset_args()
         run_cmd(cmd, dry_run=args.dry_run)
