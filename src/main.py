@@ -15,7 +15,7 @@ import numpy as np
 import math
 
 class RetrievalContext:
-    def __init__(self, args, reranker, reranker_tokenizer, article_network, chroma_collection, conflicts, chroma_db_name):
+    def __init__(self, args, reranker, reranker_tokenizer, article_network, chroma_collection, conflicts, chroma_db_name, laws_df=None):
         self.args = args
         self.reranker = reranker
         self.reranker_tokenizer = reranker_tokenizer
@@ -23,6 +23,7 @@ class RetrievalContext:
         self.chroma_collection = chroma_collection
         self.conflicts = conflicts
         self.chroma_db_name = chroma_db_name
+        self.laws_df = laws_df
 
 
 def retrieve_top_conflicts(query, context, threashold=0):
@@ -30,18 +31,19 @@ def retrieve_top_conflicts(query, context, threashold=0):
     global top_conflicts_lens
     
     top_conflicts = list()
-    laws_df = pl.read_csv(laws_csv_path, infer_schema_length=10000)
+    laws_df = context.laws_df if context.laws_df is not None else pl.read_csv(laws_csv_path, infer_schema_length=10000)
+    batch_size = getattr(context.args, "batch_size", 32)
 
     if context.args.retrieval_method == "retrieval":
 
-        article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, biencoder_top_k, tokenizer = tokenizer)
+        article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer)
 
 
     elif context.args.retrieval_method == "re2":
 
         if context.args.rex_method == "rocchio":
             from src.methods.ReX.rex_methods import rocchio_binary_retriever
-            article_vector, top_conflicts = rocchio_binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, biencoder_top_k, tokenizer = tokenizer)
+            article_vector, top_conflicts = rocchio_binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer)
             final_conflicts = cross_retriever(
                 query, 
                 top_conflicts, 
@@ -49,6 +51,7 @@ def retrieve_top_conflicts(query, context, threashold=0):
                 tokenizer=context.reranker_tokenizer, 
                 article_network=context.article_network, 
                 index_method=crossencoder_index_method,
+                batch_size=batch_size,
                 query_vector=article_vector,
             )
 
@@ -61,7 +64,7 @@ def retrieve_top_conflicts(query, context, threashold=0):
 
         elif context.args.rex_method == "rex2":
 
-            article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, top_k=args.biencoder_top_k, tokenizer = tokenizer)
+            article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, top_k=args.biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer)
 
             top_conflicts_I = top_conflicts[:args.biencoder_top_k]
 
@@ -72,6 +75,7 @@ def retrieve_top_conflicts(query, context, threashold=0):
                 tokenizer=context.reranker_tokenizer, 
                 article_network=context.article_network, 
                 index_method=crossencoder_index_method,
+                batch_size=batch_size,
                 query_vector=article_vector,
             )
 
@@ -101,6 +105,7 @@ def retrieve_top_conflicts(query, context, threashold=0):
                 tokenizer=context.reranker_tokenizer, 
                 article_network=context.article_network, 
                 index_method=crossencoder_index_method,
+                batch_size=batch_size,
                 query_vector=article_vector,
             )
 
@@ -116,7 +121,7 @@ def retrieve_top_conflicts(query, context, threashold=0):
 
         elif context.args.rex_method == "baseline":
             
-            article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, biencoder_top_k, tokenizer = tokenizer)
+            article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer)
 
             final_conflicts = cross_retriever(
                 query, 
@@ -125,6 +130,7 @@ def retrieve_top_conflicts(query, context, threashold=0):
                 tokenizer=context.reranker_tokenizer, 
                 article_network=context.article_network, 
                 index_method=crossencoder_index_method,
+                batch_size=batch_size,
                 query_vector=article_vector,
             )
 
@@ -189,6 +195,8 @@ if __name__ == "__main__":
     parser.add_argument("--subset_ratio", "--sample_ratio", "--mini_ratio", type=float, default=None, dest="subset_ratio", help="subset sampling: fraction (0,1] stratified sampling for test.jsonl, e.g. 0.15. More representative than --debug head (alias --mini_ratio deprecated)")
     parser.add_argument("--subset_seed", "--sample_seed", "--mini_seed", type=int, default=42, dest="subset_seed", help="seed for subset sampling (alias --mini_seed deprecated)")
     parser.add_argument("--subset_laws", "--mini_laws", "--law_nodes", type=int, default=None, dest="subset_laws", help="subset laws: limit number of articles in LMGraph (graph-aware) (alias --mini_laws deprecated)")
+
+    parser.add_argument("--batch_size", type=int, default=32, help="batch size for encoding and retrieval operations (default 32)")
 
     # output location for retrieval results (avoid overwriting across experiments)
     parser.add_argument("--output_dir", type=str, default="./outputs/retrieval_results", help="directory to save retrieval results, e.g. ./outputs/my_experiment to avoid overwriting (default: ./outputs/retrieval_results)")
@@ -275,11 +283,8 @@ if __name__ == "__main__":
 
         reranker_tokenizer = AutoTokenizer.from_pretrained(crossencoder_model_path)
         reranker.eval()
-    else:
-        reranker = None
-        reranker_tokenizer = None
-
-    context = RetrievalContext(args, reranker, reranker_tokenizer, article_network, chroma_collection, conflicts, chroma_db_name)
+    laws_df = pl.read_csv(laws_csv_path, infer_schema_length=10000)
+    context = RetrievalContext(args, reranker, reranker_tokenizer, article_network, chroma_collection, conflicts, chroma_db_name, laws_df=laws_df)
 
     if args.mode == "inference":
         top_conflicts = retrieve_top_conflicts(query, context)

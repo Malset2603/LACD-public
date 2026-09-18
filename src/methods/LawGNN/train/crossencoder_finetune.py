@@ -105,6 +105,7 @@ if __name__ == "__main__":
     parser.add_argument("--subset_ratio", "--sample_ratio", "--mini_ratio", type=float, default=None, dest="subset_ratio", help="subset sampling: fraction (0,1] stratified sampling, e.g. 0.15 (alias --mini_ratio deprecated)")
     parser.add_argument("--subset_seed", "--sample_seed", "--mini_seed", type=int, default=42, dest="subset_seed", help="seed for subset sampling (alias --mini_seed deprecated)")
     parser.add_argument("--subset_laws", "--mini_laws", "--law_nodes", type=int, default=None, dest="subset_laws", help="subset laws: limit number of articles (graph-aware) (alias --mini_laws deprecated)")
+    parser.add_argument("--batch_size", type=int, default=16, help="batch size for training and evaluation (default 16)")
     parser.add_argument("--max_length", type=int, default=4096, help="max token length (default 4096, use 512 for mini VRAM)")
     parser.add_argument("--fp16", action="store_true", help="enable fp16")
     parser.add_argument("--gradient_checkpointing", action="store_true", help="enable gradient checkpointing")
@@ -208,7 +209,7 @@ if __name__ == "__main__":
     tokenizer = model.tokenizer
     model.encoder.resize_token_embeddings(len(tokenizer))
 
-    batch_size = 16
+    batch_size = args.batch_size
 
     if args.gnn_append_mode == "append":
         original_model = torch.load(f"./data/models/LACD-cross/{args.gnn_append_model_tag}/model.pth")
@@ -460,7 +461,7 @@ if __name__ == "__main__":
         os.makedirs("./visualization/", exist_ok=True)
 
         # Create DataLoader for test dataset (adjust batch size as needed)
-        test_loader = DataLoader(test_dataset, batch_size=4, shuffle=False)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
         model.eval()
         all_losses_true = []

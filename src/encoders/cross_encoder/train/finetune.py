@@ -29,7 +29,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--method", type=str, help="baseline or case-augmentation or case-concat-augmentation or rule-augmentation or rule-augmentation-hierarchical", default="baseline")
     parser.add_argument("--seed",type=int,help="seed",default=42)
-
+    parser.add_argument("--batch_size", type=int, default=4, help="batch size for training and evaluation (default 4)")
 
     args = parser.parse_args()
 
@@ -130,8 +130,8 @@ if __name__ == "__main__":
     training_args = TrainingArguments(
         output_dir=f'./outputs/LACD-cross/small-fine-tune/{tag}',  # output directory
         num_train_epochs=epoch_num,                          # total number of training epochs
-        per_device_train_batch_size=4,               # batch size for training
-        per_device_eval_batch_size=4,                # batch size for evaluation
+        per_device_train_batch_size=args.batch_size,         # batch size for training
+        per_device_eval_batch_size=args.batch_size,          # batch size for evaluation
         warmup_steps=500,                            # number of warmup steps for learning rate scheduler
         weight_decay=0,
         logging_dir=f'./outputs/LACD-cross/small-fine-tune/{tag}',  # directory for storing logs

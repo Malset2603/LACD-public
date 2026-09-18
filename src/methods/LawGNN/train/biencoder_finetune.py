@@ -54,6 +54,7 @@ if __name__ == "__main__":
     parser.add_argument("--chroma_db_name", type=str, required=True, help="Name of the Chroma DB where encodings will be stored")
     parser.add_argument("--gnn_method", type=str, help="Name of GNN method", default = "gcn")
     parser.add_argument("--seed", type=int, help="seed", default=42)
+    parser.add_argument("--batch_size", type=int, default=128, help="batch size for training/evaluation (default 128)")
     # Loss selection for GNN bi-encoder (default keeps original GReX behavior)
     parser.add_argument("--biencoder_loss", type=str, default="default", choices=["default", "bce", "infonce"],
                         help="loss for GNN bi-encoder: 'default' (original GReX: CosineEmbeddingLoss for cosine, BCE for linear), 'bce', or 'infonce' (contrastive)")
@@ -152,7 +153,7 @@ if __name__ == "__main__":
     val_dataset = load_dataset(LACD_DATASET_PATH+'val.jsonl', article_network)
     test_dataset = load_dataset(LACD_DATASET_PATH+'test.jsonl', article_network)
 
-    batch_size = 128  # You can adjust the batch size as needed
+    batch_size = args.batch_size
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
