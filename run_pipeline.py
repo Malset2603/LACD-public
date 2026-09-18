@@ -78,6 +78,13 @@ def main():
     parser.add_argument("--fp16", action="store_true", help="Enable fp16")
     parser.add_argument("--gradient_checkpointing", action="store_true", help="Enable gradient checkpointing to save VRAM")
     parser.add_argument("--top_k", type=int, default=10, help="Top-K for retrieval and eval")
+    # GReX / ReX expansion options (default: 'rex2' for full GReX method)
+    parser.add_argument("--rex_method", type=str, default="rex2", choices=["rex2", "baseline", "rocchio"],
+                        help="ReX expansion method: 'rex2' (GReX full method, default), 'baseline' (Re2+LGNN without expansion), or 'rocchio'")
+    parser.add_argument("--rex_conflict", type=str, default="train", choices=["train", "train-generate"],
+                        help="Conflict graph source for ReX expansion ('train' or 'train-generate')")
+    parser.add_argument("--gnn_edge_way", type=str, default="both", choices=["both", "forward", "backward"],
+                        help="Edge propagation direction in ArticleNetwork ('both', 'forward', 'backward')")
     # Phase 1a: bi-encoder loss selection (default keeps original GReX BCE)
     parser.add_argument("--biencoder_loss", type=str, default="bce", choices=["bce", "infonce"],
                         help="Loss for bi-encoder: 'bce' (original GReX, default) or 'infonce' (contrastive with temperature)")
@@ -104,7 +111,7 @@ def main():
     summary_path = os.path.join(output_dir, "summary.json")
 
     os.makedirs(output_dir, exist_ok=True)
-    print(f"[INFO] exp={args.exp} bi_tag={bi_tag} cross_tag={cross_tag} chroma={chroma_name} output_dir={output_dir} steps={sorted(steps)}")
+    print(f"[INFO] exp={args.exp} bi_tag={bi_tag} cross_tag={cross_tag} chroma={chroma_name} rex_method={args.rex_method} output_dir={output_dir} steps={sorted(steps)}")
 
     # Helper to build common subset args
     def subset_args():
@@ -143,8 +150,7 @@ def main():
             sys.executable, "./src/main.py",
             "--biencoder_model_path", f"./data/models/LACD-bi/{bi_tag}",
             "--chroma_db_name", chroma_name,
-            "--biencoder_method", "baseline",
-            "--retrieval_method", "bi-only",
+            "--retrieval_method", "retrieval",
         ] + subset_args()
         run_cmd(cmd, dry_run=args.dry_run)
 
@@ -164,20 +170,20 @@ def main():
             cmd.append("--fp16")
         run_cmd(cmd, dry_run=args.dry_run)
 
-    # Step 4: Benchmark hybrid
+    # Step 4: Benchmark GReX retrieval (Rerank-then-Expand)
     if 4 in steps:
         cmd = [
             sys.executable, "./src/main.py",
             "--crossencoder_model_path", f"./data/models/LACD-cross/gnns/{cross_tag}",
             "--biencoder_model_path", f"./data/models/LACD-bi/{bi_tag}",
             "--chroma_db_name", chroma_name,
-            "--retrieval_method", "hybrid",
+            "--retrieval_method", "re2",
             "--crossencoder_index_method", args.gnn_method,
-            "--crossencoder_method", "baseline",
-            "--biencoder_method", "baseline",
+            "--rex_method", args.rex_method,
+            "--rex_conflict", args.rex_conflict,
+            "--gnn_edge_way", args.gnn_edge_way,
             "--mode", "test-benchmark",
             "--output_dir", output_dir,
-            "--crossencoder_top_k", str(args.top_k),
             "--biencoder_top_k", str(args.top_k),
         ] + subset_args()
         run_cmd(cmd, dry_run=args.dry_run)
