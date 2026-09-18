@@ -154,6 +154,7 @@ def main():
             "--chroma_db_name", chroma_name,
             "--retrieval_method", "retrieval",
             "--batch_size", str(eval_batch_size),
+            "--max_length", str(args.max_length),
         ] + subset_args()
         run_cmd(cmd, dry_run=args.dry_run)
 
@@ -189,6 +190,7 @@ def main():
             "--mode", "test-benchmark",
             "--output_dir", output_dir,
             "--batch_size", str(eval_batch_size),
+            "--max_length", str(args.max_length),
             "--biencoder_top_k", str(args.top_k),
         ] + subset_args()
         run_cmd(cmd, dry_run=args.dry_run)

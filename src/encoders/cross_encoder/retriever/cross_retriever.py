@@ -8,7 +8,7 @@ from src.utils.utils import article_key_function
 
 import time
 
-def cross_retriever(query, top_k_articles, cross_encoder_model, tokenizer, article_network:ArticleNetwork, batch_size=64, index_method = "none", query_vector = None):
+def cross_retriever(query, top_k_articles, cross_encoder_model, tokenizer, article_network:ArticleNetwork, batch_size=64, index_method = "none", query_vector = None, max_length=None):
     """
     Function to use a cross-encoder to distinguish conflicts in top-k retrieved articles using batch processing.
 
@@ -62,7 +62,7 @@ def cross_retriever(query, top_k_articles, cross_encoder_model, tokenizer, artic
 
 
 
-        max_length = min([MAX_TOKEN_LENGTH, tokenizer.model_max_length])
+        max_length = min([max_length or MAX_TOKEN_LENGTH, tokenizer.model_max_length])
 
         # Tokenize the batch of (article, batch_articles) pairs
         inputs = tokenizer.batch_encode_plus(

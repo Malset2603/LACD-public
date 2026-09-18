@@ -44,10 +44,11 @@ def retrieve_top_conflicts(query, context, threashold=0):
         context.laws_df = pl.read_csv(csv_path, infer_schema_length=10000)
     laws_df = context.laws_df
     batch_size = getattr(context.args, "batch_size", 32)
+    retriever_max_length = getattr(context.args, "max_length", None)
 
     if context.args.retrieval_method == "retrieval":
 
-        article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer)
+        article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer, max_length=retriever_max_length)
 
 
     elif context.args.retrieval_method == "re2":
@@ -63,6 +64,7 @@ def retrieve_top_conflicts(query, context, threashold=0):
                 article_network=context.article_network, 
                 index_method=crossencoder_index_method,
                 batch_size=batch_size,
+                max_length=retriever_max_length,
                 query_vector=article_vector,
             )
 
@@ -75,7 +77,7 @@ def retrieve_top_conflicts(query, context, threashold=0):
 
         elif context.args.rex_method == "rex2":
 
-            article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, top_k=args.biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer)
+            article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, top_k=args.biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer, max_length=retriever_max_length)
 
             top_conflicts_I = top_conflicts[:args.biencoder_top_k]
 
@@ -87,6 +89,7 @@ def retrieve_top_conflicts(query, context, threashold=0):
                 article_network=context.article_network, 
                 index_method=crossencoder_index_method,
                 batch_size=batch_size,
+                max_length=retriever_max_length,
                 query_vector=article_vector,
             )
 
@@ -117,6 +120,7 @@ def retrieve_top_conflicts(query, context, threashold=0):
                 article_network=context.article_network, 
                 index_method=crossencoder_index_method,
                 batch_size=batch_size,
+                max_length=retriever_max_length,
                 query_vector=article_vector,
             )
 
@@ -132,7 +136,7 @@ def retrieve_top_conflicts(query, context, threashold=0):
 
         elif context.args.rex_method == "baseline":
             
-            article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer)
+            article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer, max_length=retriever_max_length)
 
             final_conflicts = cross_retriever(
                 query, 
@@ -142,6 +146,7 @@ def retrieve_top_conflicts(query, context, threashold=0):
                 article_network=context.article_network, 
                 index_method=crossencoder_index_method,
                 batch_size=batch_size,
+                max_length=retriever_max_length,
                 query_vector=article_vector,
             )
 
@@ -208,6 +213,7 @@ if __name__ == "__main__":
     parser.add_argument("--subset_laws", "--mini_laws", "--law_nodes", type=int, default=None, dest="subset_laws", help="subset laws: limit number of articles in LMGraph (graph-aware) (alias --mini_laws deprecated)")
 
     parser.add_argument("--batch_size", type=int, default=32, help="batch size for encoding and retrieval operations (default 32)")
+    parser.add_argument("--max_length", type=int, default=None, help="max token length cap for retriever tokenization (default None = per-module legacy caps, always bounded by tokenizer.model_max_length)")
 
     # output location for retrieval results (avoid overwriting across experiments)
     parser.add_argument("--output_dir", type=str, default="./outputs/retrieval_results", help="directory to save retrieval results, e.g. ./outputs/my_experiment to avoid overwriting (default: ./outputs/retrieval_results)")

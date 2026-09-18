@@ -14,7 +14,7 @@ MAX_TOKEN_LENGTH = 4096
 # MAX_TOKEN_LENGTH = 512
 
 # our original code, bi-encoder.
-def find_top_conflicts(article, model, tokenizer, chroma_collection, top_k=10, index_method = "none"):
+def find_top_conflicts(article, model, tokenizer, chroma_collection, top_k=10, index_method = "none", max_length=None):
     """
     Function to find top conflicts using cosine similarity method with optional case augmentation.
     
@@ -33,10 +33,12 @@ def find_top_conflicts(article, model, tokenizer, chroma_collection, top_k=10, i
         top_k = 500
 
     # Encode the input article
+    # max_length caps sequence length (None = legacy module cap), always bounded by tokenizer.model_max_length
+    ml = min(max_length or MAX_TOKEN_LENGTH, tokenizer.model_max_length)
     inputs = tokenizer.encode_plus(
         article,
         add_special_tokens=True,
-        max_length=MAX_TOKEN_LENGTH,
+        max_length=ml,
         padding="max_length",
         truncation=True,
         return_tensors="pt",
@@ -75,6 +77,7 @@ def binary_retriever(
     tokenizer=None,
     allowed_keys=None,
     article_network=None,
+    max_length=None,
     **kwargs
 ):
     """
@@ -90,6 +93,8 @@ def binary_retriever(
         tokenizer: Tokenizer for the model.
         allowed_keys: Optional set of allowed article keys for filtering.
         article_network: Optional ArticleNetwork instance.
+        max_length: Optional cap for tokenizer sequence length (None = legacy
+            module cap MAX_TOKEN_LENGTH, always bounded by tokenizer.model_max_length).
 
     Returns:
         tuple (pooled_output, top_k_articles)
@@ -157,7 +162,7 @@ def binary_retriever(
         for idx in range(len(all_articles)):
             ids.append(str(idx))
 
-        max_length = min(MAX_TOKEN_LENGTH, tokenizer.model_max_length) if tokenizer is not None else MAX_TOKEN_LENGTH
+        max_length = min(max_length or MAX_TOKEN_LENGTH, tokenizer.model_max_length) if tokenizer is not None else (max_length or MAX_TOKEN_LENGTH)
 
         embeddings = []
         documents = []
@@ -203,7 +208,7 @@ def binary_retriever(
 
     # 6. Retrieve top conflicts
     article_vector, top_conflicts = find_top_conflicts(
-        article_to_check, model, tokenizer, chroma_collection, top_k=top_k
+        article_to_check, model, tokenizer, chroma_collection, top_k=top_k, max_length=max_length
     )
 
     return article_vector, top_conflicts
