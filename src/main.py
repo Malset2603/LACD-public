@@ -23,6 +23,11 @@ class RetrievalContext:
         self.chroma_collection = chroma_collection
         self.conflicts = conflicts
         self.chroma_db_name = chroma_db_name
+        # Load laws.csv once here (not per query): ~40MB parsed a single time
+        # and shared by reference across all benchmark iterations.
+        if laws_df is None:
+            csv_path = getattr(args, "laws_csv_path", "./data/database/laws.csv")
+            laws_df = pl.read_csv(csv_path, infer_schema_length=10000)
         self.laws_df = laws_df
 
 
@@ -31,7 +36,13 @@ def retrieve_top_conflicts(query, context, threashold=0):
     global top_conflicts_lens
     
     top_conflicts = list()
-    laws_df = context.laws_df if context.laws_df is not None else pl.read_csv(laws_csv_path, infer_schema_length=10000)
+    # laws_df is loaded once in RetrievalContext.__init__ and reused by
+    # reference. Lazy-cache here as a safety net for contexts built without
+    # it (never re-read per query).
+    if context.laws_df is None:
+        csv_path = getattr(context.args, "laws_csv_path", "./data/database/laws.csv")
+        context.laws_df = pl.read_csv(csv_path, infer_schema_length=10000)
+    laws_df = context.laws_df
     batch_size = getattr(context.args, "batch_size", 32)
 
     if context.args.retrieval_method == "retrieval":
@@ -278,6 +289,8 @@ if __name__ == "__main__":
         print(f"[SUBSET] ArticleNetwork nodes {len(article_network.all_article_keys)} subset_laws={args.subset_laws} edges {edge_index_tensor.shape[1]//2}")
 
 
+    reranker = None
+    reranker_tokenizer = None
     if args.retrieval_method in ["re2"]:
         reranker = torch.load(crossencoder_model_path + "/model.pth", weights_only=False)
 
