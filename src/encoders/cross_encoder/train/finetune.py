@@ -72,9 +72,9 @@ if __name__ == "__main__":
         
 
     # 분할된 인덱스를 사용하여 train, test 데이터프레임 생성
-    train_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl')
-    test_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl')
-    val_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl')
+    train_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide-refine/train.jsonl')
+    test_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide-refine/test.jsonl')
+    val_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide-refine/val.jsonl')
 
 
     if args.data_augmentation == "None":

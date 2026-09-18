@@ -1,5 +1,4 @@
 SEED = 42
-LACD_DATASET_PATH="./data/datasets/LACD-biclassification/train-test-divide/"
 LACD_DATASET_PATH="./data/datasets/LACD-biclassification/train-test-divide-refine/"
 # LACD_DATASET_PATH="./data/datasets/LACD-biclassification/train-test-divide-filter7/"
 

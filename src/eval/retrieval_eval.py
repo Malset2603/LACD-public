@@ -28,6 +28,7 @@ def load_ground_truth(ground_truth_path):
         # fallback candidates for backward compatibility
         candidates = [
             ground_truth_path,
+            "./data/datasets/LACD-biclassification/train-test-divide-refine/test.jsonl",
             "./data/datasets/LACD-biclassification/train-test-divide/test.jsonl",
             "./data/datasets/LACD-retrieval/test.jsonl",
             "./data/datasets/LACD-biclassification/checker-generated/raw_links_small.jsonl",
@@ -315,7 +316,7 @@ if __name__ == "__main__":
 
     # Eval arguments
     parser.add_argument("--result_path", type=str, default="./outputs/retrieval_results", help="Path to retrieval result jsonl file or directory (e.g. ./outputs/my_experiment/baseline_gat_baseline_laws10000.jsonl or ./outputs/retrieval_results)")
-    parser.add_argument("--ground_truth_path", type=str, default="./data/datasets/LACD-biclassification/train-test-divide/test.jsonl", help="Path to ground truth test.jsonl")
+    parser.add_argument("--ground_truth_path", type=str, default="./data/datasets/LACD-biclassification/train-test-divide-refine/test.jsonl", help="Path to ground truth test.jsonl")
     parser.add_argument("--top_k", type=int, default=5, help="Top-K for recall/precision (default 5)")
     parser.add_argument("--biencoder_top_k", type=int, default=10, help="Biencoder top-K used during retrieval (for logging only)")
     parser.add_argument("--output_missed", type=str, default=None, help="Optional path to save missed_pairs.jsonl")

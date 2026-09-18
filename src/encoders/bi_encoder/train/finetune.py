@@ -101,18 +101,18 @@ if __name__ == "__main__":
     # early-load: sampling happens while reading the file, do not load 100% then slice
     if args.subset_ratio is not None:
         from src.utils.utils import load_dataframe_early
-        train_df, orig_train = load_dataframe_early('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl', ratio=args.subset_ratio, seed=args.subset_seed, label_col="answer")
-        val_df, orig_val = load_dataframe_early('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl', ratio=args.subset_ratio, seed=args.subset_seed, label_col="answer")
-        test_df, orig_test = load_dataframe_early('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl', ratio=args.subset_ratio, seed=args.subset_seed, label_col="answer")
+        train_df, orig_train = load_dataframe_early('./data/datasets/LACD-biclassification/train-test-divide-refine/train.jsonl', ratio=args.subset_ratio, seed=args.subset_seed, label_col="answer")
+        val_df, orig_val = load_dataframe_early('./data/datasets/LACD-biclassification/train-test-divide-refine/val.jsonl', ratio=args.subset_ratio, seed=args.subset_seed, label_col="answer")
+        test_df, orig_test = load_dataframe_early('./data/datasets/LACD-biclassification/train-test-divide-refine/test.jsonl', ratio=args.subset_ratio, seed=args.subset_seed, label_col="answer")
         # Polars: height and sum
         train_pos = train_df.filter(pl.col("answer") == True).height
         val_pos = val_df.filter(pl.col("answer") == True).height
         print(f"[SUBSET] early-load ratio={args.subset_ratio} seed={args.subset_seed} -> train {orig_train}->{train_df.height} val {orig_val}->{val_df.height} test {orig_test}->{test_df.height} (stratified)")
         print(f"[SUBSET] train pos {train_pos}/{train_df.height} ({train_pos/train_df.height:.1%} if train_df.height else 0), val {val_pos}/{val_df.height} ({val_pos/val_df.height:.1%} if val_df.height else 0)")
     else:
-        train_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl')
-        test_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl')
-        val_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl')
+        train_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide-refine/train.jsonl')
+        test_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide-refine/test.jsonl')
+        val_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide-refine/val.jsonl')
 
     if args.debug:
         print(f"[DEBUG] limiting datasets to {args.debug_limit} samples per split, epoch=1")

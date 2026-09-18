@@ -173,10 +173,10 @@ if __name__ == "__main__":
 
 
     # Load datasets
-    train_dataset = GNNNLIDataset(load_dataset('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl', article_network))
+    train_dataset = GNNNLIDataset(load_dataset('./data/datasets/LACD-biclassification/train-test-divide-refine/train.jsonl', article_network))
     # we do not need to multiply cases for val, test datasets
-    val_dataset = GNNNLIDataset(load_dataset('./data/datasets/LACD-biclassification/train-test-divide/val.jsonl', article_network))
-    test_dataset = GNNNLIDataset(load_dataset('./data/datasets/LACD-biclassification/train-test-divide/test.jsonl', article_network))
+    val_dataset = GNNNLIDataset(load_dataset('./data/datasets/LACD-biclassification/train-test-divide-refine/val.jsonl', article_network))
+    test_dataset = GNNNLIDataset(load_dataset('./data/datasets/LACD-biclassification/train-test-divide-refine/test.jsonl', article_network))
 
     training_args = TrainingArguments(
         output_dir=f'./outputs/LACD-cross/gnns/{args.tag}',  # output directory
