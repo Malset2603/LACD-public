@@ -7,13 +7,14 @@ from transformers import Trainer, TrainingArguments
 import torch
 import argparse
 from torch.utils.tensorboard import SummaryWriter # type: ignore
-from src.utils.encoder.crossencoder_utils import CrossEncoderModel, NLIDataset
+from transformers import DataCollatorWithPadding
+from src.utils.encoder.crossencoder_utils import CrossEncoderModel, NLIDataset, RuleCrossEncoderModel, RuleHierarchicalEncoderModel
 from src.utils.encoder.utils import data_augmentation, balance_dataframe, MAX_TOKEN_LENGTH, compute_metrics, TensorBoardCallback
-from src.utils.utils import seed_everything, SEED
+from src.utils.utils import seed_everything, SEED, LACD_DATASET_PATH
 
 
 if __name__ == "__main__":
-    seed_everything(SEED)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="monologg/kobigbird-bert-base")
     parser.add_argument("--mode", type=str, help="train, test, or inference", default="train")
@@ -24,11 +25,15 @@ if __name__ == "__main__":
     parser.add_argument("--data_augmentation", type=str, help="None, augmentation, noA, noB, noswap, or nobalance", default="None")
 
     parser.add_argument("--case_multiplier", type = int, default=1)
-    parser.add_argument("--epoch", type = int, default=3)
+    parser.add_argument("--epoch", type = int, default=5)
 
-    parser.add_argument("--method", type=str, help="baseline or case-augmentation or case-concat-augmentation", default="baseline")
+    parser.add_argument("--method", type=str, help="baseline or case-augmentation or case-concat-augmentation or rule-augmentation or rule-augmentation-hierarchical", default="baseline")
+    parser.add_argument("--seed",type=int,help="seed",default=42)
+
 
     args = parser.parse_args()
+
+    seed_everything(args.seed)
 
     case_multiplier = args.case_multiplier
     model_name = args.model
@@ -40,7 +45,13 @@ if __name__ == "__main__":
     # tokenizer.add_special_tokens({'pad_token': '[PAD]'})
     # model.config.pad_token_id = model.config.eos_token_id
 
-    model = CrossEncoderModel(model_name=model_name)
+    # model = CrossEncoderModel(model_name=model_name)
+    if args.method == "rule-augmentation-divide":
+        model = RuleCrossEncoderModel(model_name=model_name)
+    elif args.method == "rule-augmentation-hierarchical":
+        model = RuleHierarchicalEncoderModel(model_name=model_name)
+    else:
+        model = CrossEncoderModel(model_name=model_name)
     # optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     tokenizer = model.tokenizer
     model.encoder.resize_token_embeddings(len(tokenizer))
@@ -50,7 +61,15 @@ if __name__ == "__main__":
     if args.method == "case-augmentation" or args.method == "case-concat-augmentation":
         from src.methods.case_augmentation.prompt import case_cache_start, case_cache_end
         case_cache_start()
+    
+    
+    elif args.method == "rule-augmentation" or args.method == "rule-augmentation-divide" or args.method == "rule-augmentation-hierarchical":
+        from src.methods.rule_augmentation.prompt import rule_cache_start, rule_cache_end
+        rule_cache_start()
+    
 
+
+        
 
     # 분할된 인덱스를 사용하여 train, test 데이터프레임 생성
     train_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide/train.jsonl')
@@ -66,10 +85,14 @@ if __name__ == "__main__":
     else:
         train_df = data_augmentation(train_df, args.data_augmentation)
 
-    # train_df에 'case_idx' 컬럼을 추가하고 모든 값을 0으로 설정
+    # train_df에 'case_idx' 및 'rule_idx' 컬럼을 추가하고 모든 값을 0으로 설정
     train_df = train_df.with_columns(pl.lit(0).alias("case_idx"))
     test_df = test_df.with_columns(pl.lit(0).alias("case_idx"))
     val_df = val_df.with_columns(pl.lit(0).alias("case_idx"))
+    if "rule" in args.method:
+        train_df = train_df.with_columns(pl.lit(0).alias("rule_idx"))
+        test_df = test_df.with_columns(pl.lit(0).alias("rule_idx"))
+        val_df = val_df.with_columns(pl.lit(0).alias("rule_idx"))
 
     original_train_df = train_df.clone()
     # case_multiplier가 1보다 클 경우에만 아래의 코드를 실행
@@ -81,10 +104,23 @@ if __name__ == "__main__":
             # 복제한 데이터프레임을 원래 데이터프레임에 붙여넣기
             train_df = pl.concat([train_df, temp_df], how="vertical")
 
-    
-    train_dataset = NLIDataset(train_df, tokenizer, max_length=MAX_TOKEN_LENGTH, method=args.method)
-    test_dataset = NLIDataset(test_df, tokenizer, max_length=MAX_TOKEN_LENGTH, method=args.method)
-    val_dataset = NLIDataset(val_df, tokenizer, max_length=MAX_TOKEN_LENGTH, method=args.method)
+    elif "rule" in args.method and case_multiplier > 1:
+        # 1부터 case_multiplier-1까지 반복
+        for i in range(1, case_multiplier):
+            # train_df를 복제
+            temp_df = original_train_df.clone().with_columns(pl.lit(i).alias("rule_idx"))
+            # 복제한 데이터프레임을 원래 데이터프레임에 붙여넣기
+            train_df = pl.concat([train_df, temp_df], how="vertical")
+
+    if args.method == "rule-augmentation-hierarchical":
+        train_dataset = NLIDataset(train_df, tokenizer, max_length=512, method=args.method)
+        test_dataset = NLIDataset(test_df, tokenizer, max_length=512, method=args.method)
+        val_dataset = NLIDataset(val_df, tokenizer, max_length=512, method=args.method)
+
+    else:
+        train_dataset = NLIDataset(train_df, tokenizer, max_length=MAX_TOKEN_LENGTH, method=args.method)
+        test_dataset = NLIDataset(test_df, tokenizer, max_length=MAX_TOKEN_LENGTH, method=args.method)
+        val_dataset = NLIDataset(val_df, tokenizer, max_length=MAX_TOKEN_LENGTH, method=args.method)
 
     print(f"Token limit for {args.model}: {tokenizer.model_max_length}")
     train_dataset.print_label_counts()
@@ -100,10 +136,10 @@ if __name__ == "__main__":
         weight_decay=0,
         logging_dir=f'./outputs/LACD-cross/small-fine-tune/{tag}',  # directory for storing logs
         # logging_steps=10,
-        eval_strategy="steps",                       # evaluation strategy
-        eval_steps=20,                               # evaluation interval
-        save_strategy="steps",                       # save strategy to match eval steps
-        save_steps=20,                               # save interval matching eval steps
+        eval_strategy="epoch",                       # evaluation strategy
+        eval_steps=1,                               # evaluation interval
+        save_strategy="epoch",                       # save strategy to match eval steps
+        save_steps=1,                               # save interval matching eval steps
         save_total_limit=1,                          # only keep the best model
         load_best_model_at_end=True,                 # load the best model at the end
         metric_for_best_model="eval_roc_auc",           # metric to use for model selection
@@ -190,20 +226,23 @@ if __name__ == "__main__":
         
         # for i in range(len(true_labels)):
         #     if pred_labels[i] != true_labels[i]:  # 예측이 틀린 경우
+        #         row = test_df.row(i, named=True)
         #         incorrect_instances.append({
         #             'index': i,
-        #             'article1': test_df.iloc[i]['article1'],  # test 데이터에서 첫 번째 문장
-        #             'article2': test_df.iloc[i]['article2'],  # test 데이터에서 두 번째 문장
-        #             'true_label': int(true_labels[i]),               # 실제 레이블
+        #             'article1': row['article1'],  # test 데이터에서 첫 번째 문장 (Polars)
+        #             'article2': row['article2'],  # test 데이터에서 두 번째 문장 (Polars)
+        #             'true_label': int(true_labels[i]),          # 실제 레이블
         #             'predicted_label': int(pred_labels[i])      # 예측된 레이블
         #         })
         
         # # 틀린 instance를 jsonl 파일로 저장
         # import json
         # incorrect_file_path = f"./outputs/LACD-cross/small-fine-tune/{tag}/incorrect_instances.jsonl"
-        # with open(incorrect_file_path, 'w') as f:
+        # with open(incorrect_file_path, 'w', encoding='utf-8') as f:
         #     for instance in incorrect_instances:
         #         f.write(json.dumps(instance, ensure_ascii=False) + '\n')
     
     if args.method == "case-augmentation" or args.method == "case-concat-augmentation":
         case_cache_end()
+    elif args.method == "rule-augmentation":
+        rule_cache_end()

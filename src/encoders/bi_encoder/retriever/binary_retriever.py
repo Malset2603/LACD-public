@@ -7,85 +7,16 @@ from torch.nn.functional import cosine_similarity
 import numpy as np
 from tqdm import tqdm
 
-from src.utils.encoder.utils import MAX_TOKEN_LENGTH
-from src.methods.case_augmentation.prompt import generate_case
-
+# from src.utils.encoder.utils import MAX_TOKEN_LENGTH
 import time
 
-
-
-def find_top_contradictions_with_classifier(article, model, tokenizer, chroma_collection, top_k=10, method="baseline"):
-    """
-    Function to find top contradictions using classifier method with optional case augmentation.
-    
-    Args:
-    article (str): The input article to check.
-    model (torch.nn.Module): Pre-trained model with classifier.
-    tokenizer (transformers.PreTrainedTokenizer): Tokenizer for the model.
-    chroma_collection: Chroma DB collection containing the encoded laws.
-    top_k (int): Number of top-k articles to retrieve.
-    method (str): Method to use, "baseline" or "caseaug" for case augmentation.
-
-    Returns:
-    List of top-k articles that contradict the input article.
-    """
-    if method == "caseaug":
-        case = generate_case(None, None, article)
-        article = article + " " + case
-
-    # Encode the input article
-    inputs = tokenizer.encode_plus(
-        article,
-        add_special_tokens=True,
-        max_length=MAX_TOKEN_LENGTH,
-        padding="max_length",
-        truncation=True,
-        return_tensors="pt",
-    )
-    input_ids = inputs["input_ids"].to(model.encoder.device)
-    attention_mask = inputs["attention_mask"].to(model.encoder.device)
-
-    with torch.no_grad():
-        encoded_article = model.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        pooled_output = encoded_article.last_hidden_state[0, 0, :].to(model.encoder.device)  
-
-    # Retrieve encoded laws from Chroma DB
-    encoded_laws = chroma_collection.get(include=["embeddings", "documents"])
-    law_vectors = np.array(encoded_laws["embeddings"])
-    law_documents = encoded_laws["documents"]
-
-    retrieval_start_time = time.time()
-
-
-    logits_list = []
-    for law_vector in tqdm(law_vectors):
-        law_vector_tensor = torch.tensor(law_vector, dtype=torch.float32).to(model.encoder.device)
-        combined_input = torch.cat([pooled_output, law_vector_tensor], dim=-1).unsqueeze(0)
-
-        with torch.no_grad():
-            logits = model.classifier(combined_input)
-            logits_list.append(logits.item())
-
-
-
-
-    logits_array = np.array(logits_list)
-    top_k_indices = logits_array.argsort()[::-1][:top_k]
-    top_k_articles = [law_documents[i] for i in top_k_indices]
-
-    retrieval_end_time = time.time()
-
-    elapsed_time = retrieval_end_time - retrieval_start_time
-    # print(f"biencoder 실행 시간: {elapsed_time:.6f}초")
-
-
-    return pooled_output, top_k_articles
-
+MAX_TOKEN_LENGTH = 4096
+# MAX_TOKEN_LENGTH = 512
 
 # our original code, bi-encoder.
-def find_top_contradictions_with_cosine(article, model, tokenizer, chroma_collection, top_k=10, method="baseline"):
+def find_top_conflicts(article, model, tokenizer, chroma_collection, top_k=10, index_method = "none"):
     """
-    Function to find top contradictions using cosine similarity method with optional case augmentation.
+    Function to find top conflicts using cosine similarity method with optional case augmentation.
     
     Args:
     article (str): The input article to check.
@@ -98,9 +29,8 @@ def find_top_contradictions_with_cosine(article, model, tokenizer, chroma_collec
     Returns:
     List of top-k articles that contradict the input article.
     """
-    if method == "caseaug":
-        case = generate_case(None, None, article)
-        article = article + " " + case
+    if top_k > 50000:
+        top_k = 500
 
     # Encode the input article
     inputs = tokenizer.encode_plus(
@@ -118,63 +48,71 @@ def find_top_contradictions_with_cosine(article, model, tokenizer, chroma_collec
         encoded_article = model.encoder(input_ids=input_ids, attention_mask=attention_mask)
         pooled_output = encoded_article.last_hidden_state[0, 0, :].cpu().numpy()
 
-    # Retrieve encoded laws from Chroma DB
-    encoded_laws = chroma_collection.get(include=["embeddings", "documents"])
-    law_vectors = np.array(encoded_laws["embeddings"])
-    law_documents = encoded_laws["documents"]
-
     retrieval_start_time = time.time()
 
+    results = chroma_collection.query(
+        query_embeddings=[pooled_output.tolist()],
+        n_results=top_k,
+        include=["embeddings", "documents"]
+    )
+    top_k_articles = results["documents"][0]
 
-    similarities = cosine_similarity(
-        torch.tensor(pooled_output).unsqueeze(0),
-        torch.tensor(law_vectors)
-    ).numpy().flatten()
-
-    top_k_indices = similarities.argsort()[::-1][:top_k]
-    top_k_articles = [law_documents[i] for i in top_k_indices]
 
     retrieval_end_time = time.time()
 
     elapsed_time = retrieval_end_time - retrieval_start_time
-    # print(f"biencoder 실행 시간: {elapsed_time:.6f}초")
 
     return pooled_output, top_k_articles
 
 
-def binary_retriever(model_path, laws_csv_path, chroma_db_name, article_to_check, classification_method="cosine", top_k=500, case_augmentation_method = "baseline", batch_size = 8, allowed_keys=None, article_network=None):
+def binary_retriever(
+    model,
+    laws_df,
+    chroma_collection,
+    article_to_check,
+    top_k=500,
+    batch_size=8,
+    tokenizer=None,
+    allowed_keys=None,
+    article_network=None,
+    **kwargs
+):
     """
-    Bi-encoder retriever function to find contradictions in legal texts.
+    Bi-encoder retriever function to find conflicts in legal texts.
 
     Args:
-    model_path (str): Path to the trained model directory.
-    laws_csv_path (str): Path to the laws.csv file.
-    chroma_db_name (str): Name of the Chroma DB where encodings will be stored.
-    article_to_check (str): The article to check for contradictions.
-    classification_method (str): Method to use for classification ('cosine' or 'classification_model').
-    top_k_val (int): Number of top-k articles to retrieve.
+        model: Pre-trained model module or str path to model directory.
+        laws_df: Polars/Pandas DataFrame or str path to laws.csv.
+        chroma_collection: Chroma DB collection object or str collection name.
+        article_to_check: The article to check for conflicts.
+        top_k: Number of top-k articles to retrieve.
+        batch_size: Batch size for encoding if Chroma DB is empty.
+        tokenizer: Tokenizer for the model.
+        allowed_keys: Optional set of allowed article keys for filtering.
+        article_network: Optional ArticleNetwork instance.
 
     Returns:
-    List of top-k articles that contradict the input article.
+        tuple (pooled_output, top_k_articles)
     """
+    # 1. Resolve model & tokenizer
+    if isinstance(model, str):
+        model_path = model
+        loaded_model = torch.load(model_path + "/model.pth", weights_only=False)
+        loaded_model.eval()
+        if tokenizer is None:
+            global _TOKENIZER_CACHE
+            try:
+                _TOKENIZER_CACHE
+            except NameError:
+                _TOKENIZER_CACHE = {}  # type: ignore
+            if model_path in _TOKENIZER_CACHE:
+                tokenizer = _TOKENIZER_CACHE[model_path]
+            else:
+                tokenizer = AutoTokenizer.from_pretrained(model_path)
+                _TOKENIZER_CACHE[model_path] = tokenizer
+        model = loaded_model
 
-    model = torch.load(model_path + "/model.pth", weights_only=False)
-    model.eval()
-    # Cache tokenizer to avoid repeated HF hub reads; keep model reload fresh
-    # so vector handling in cross_retriever (fresh N) stays correct.
-    global _TOKENIZER_CACHE
-    try:
-        _TOKENIZER_CACHE
-    except NameError:
-        _TOKENIZER_CACHE = {}  # type: ignore
-    if model_path in _TOKENIZER_CACHE:
-        tokenizer = _TOKENIZER_CACHE[model_path]
-    else:
-        tokenizer = AutoTokenizer.from_pretrained(model_path)
-        _TOKENIZER_CACHE[model_path] = tokenizer
-
-    # Cache raw and filtered DataFrames to avoid re-reading/filtering on every benchmark iteration.
-    # The previous per-iteration print broke tqdm progress bar (print inside tqdm loop).
+    # 2. Resolve laws_df using Polars
     global _LAWS_DF_CACHE, _FILTERED_DF_CACHE, _SUBSET_FILTER_LOGGED
     try:
         _LAWS_DF_CACHE
@@ -183,12 +121,13 @@ def binary_retriever(model_path, laws_csv_path, chroma_db_name, article_to_check
         _FILTERED_DF_CACHE = {}  # type: ignore
         _SUBSET_FILTER_LOGGED = False  # type: ignore
 
-    laws_csv = laws_csv_path
-    if laws_csv not in _LAWS_DF_CACHE:
-        _LAWS_DF_CACHE[laws_csv] = pl.read_csv(laws_csv, infer_schema_length=10000)
-    laws_df = _LAWS_DF_CACHE[laws_csv]
+    if isinstance(laws_df, str):
+        laws_csv = laws_df
+        if laws_csv not in _LAWS_DF_CACHE:
+            _LAWS_DF_CACHE[laws_csv] = pl.read_csv(laws_csv, infer_schema_length=10000)
+        laws_df = _LAWS_DF_CACHE[laws_csv]
 
-    # early-load: filter laws_df by ArticleNetwork keep set if provided (subset_laws / mini_laws deprecated)
+    # 3. Filter laws_df by allowed_keys / article_network if provided
     if article_network is not None and hasattr(article_network, 'all_article_keys'):
         allowed_keys = set(article_network.all_article_keys)
     if allowed_keys is not None:
@@ -197,52 +136,50 @@ def binary_retriever(model_path, laws_csv_path, chroma_db_name, article_to_check
             laws_df = _FILTERED_DF_CACHE[cache_key]
         else:
             before = laws_df.height
-            # Normalize · -> ㆍ and filter by allowed_keys
             filtered_df = laws_df.filter(
                 pl.col("article_title").str.replace_all("·", "ㆍ").is_in(list(allowed_keys))
             )
             _FILTERED_DF_CACHE[cache_key] = filtered_df
             laws_df = filtered_df
-            # Log only once; use tqdm.write to avoid breaking the outer tqdm bar in src/main.py:194
             if not _SUBSET_FILTER_LOGGED:
                 tqdm.write(f"[SUBSET] Chroma filter {before}->{laws_df.height} rows by allowed_keys ({len(allowed_keys)} keep)")
                 _SUBSET_FILTER_LOGGED = True
 
-    from src.utils.encoder.biencoder_utils import load_chromaDB_byname
-    chroma_collection = load_chromaDB_byname(chroma_db_name)
+    # 4. Resolve chroma_collection
+    if isinstance(chroma_collection, str):
+        from src.utils.encoder.biencoder_utils import load_chromaDB_byname
+        chroma_collection = load_chromaDB_byname(chroma_collection)
 
-    # 인코딩이 없으면 새로 인코딩하여 저장
+    # 5. Populate Chroma DB if empty
     if chroma_collection.count() == 0:
-        
         ids = []
-        documents = []
-        embeddings = []
-
-        idx = 0
-        all_articles = []
-
-        for row in tqdm(laws_df.iter_rows(named=True)):
-            article = row["contents"]
-            if case_augmentation_method == "caseaug":
-                case = generate_case(None, None, article)
-                article = article + "\n[CASE]\n" + case    
-            all_articles.append(article)
+        all_articles = laws_df["contents"].to_list()
+        for idx in range(len(all_articles)):
             ids.append(str(idx))
-            idx += 1
 
-        # Process in batches
+        max_length = min(MAX_TOKEN_LENGTH, tokenizer.model_max_length) if tokenizer is not None else MAX_TOKEN_LENGTH
+
+        embeddings = []
+        documents = []
+
         for batch_start in tqdm(range(0, len(all_articles), batch_size)):
             batch_articles = all_articles[batch_start:batch_start + batch_size]
-            batch_inputs = tokenizer(batch_articles, add_special_tokens=True, max_length=MAX_TOKEN_LENGTH, 
-                                     padding="max_length", truncation=True, return_tensors="pt")
+            batch_inputs = tokenizer(
+                batch_articles,
+                add_special_tokens=True,
+                max_length=max_length,
+                padding="max_length",
+                truncation=True,
+                return_tensors="pt"
+            )
             input_ids = batch_inputs["input_ids"].to(model.encoder.device)
             attention_mask = batch_inputs["attention_mask"].to(model.encoder.device)
 
             with torch.no_grad():
-                encoded_articles = model.encoder(input_ids=input_ids, attention_mask=attention_mask)
+                encoder_to_use = model.passage_encoder if hasattr(model, "passage_encoder") else model.encoder
+                encoded_articles = encoder_to_use(input_ids=input_ids, attention_mask=attention_mask)
                 pooled_outputs = encoded_articles.last_hidden_state[:, 0, :].cpu().numpy()
 
-            # Collect embeddings and documents
             embeddings.extend(pooled_outputs)
             documents.extend(batch_articles)
 
@@ -263,21 +200,12 @@ def binary_retriever(model_path, laws_csv_path, chroma_db_name, article_to_check
                 embeddings=chunk_embeddings,
                 ids=chunk_ids,
             )
-        
 
+    # 6. Retrieve top conflicts
+    article_vector, top_conflicts = find_top_conflicts(
+        article_to_check, model, tokenizer, chroma_collection, top_k=top_k
+    )
 
-    # 특정 article을 입력하여 모순된 법률 찾기
-    if classification_method == "cosine":
-        article_vector, top_contradictions = find_top_contradictions_with_cosine(article_to_check, model, tokenizer, chroma_collection, top_k=top_k, method=case_augmentation_method)
-    else:
-        article_vector, top_contradictions = find_top_contradictions_with_classifier(article_to_check, model, tokenizer, chroma_collection, top_k=top_k, method=case_augmentation_method)
-
-
-    if case_augmentation_method == "caseaug":
-        top_contradictions=[t.split("[CASE]")[0] for t in top_contradictions]
-
-    
-
-    return article_vector, top_contradictions
+    return article_vector, top_conflicts
 
 

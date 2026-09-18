@@ -9,7 +9,7 @@ import argparse
 import random
 from torch.utils.data import DataLoader, Sampler
 from torch.utils.tensorboard import SummaryWriter # type: ignore
-from src.utils.utils import article_key_function, seed_everything, SEED
+from src.utils.utils import article_key_function, seed_everything, SEED, LACD_DATASET_PATH
 
 from src.utils.encoder.biencoder_utils import (
     BiEncoderModel,
@@ -21,7 +21,6 @@ from src.utils.encoder.utils import MAX_TOKEN_LENGTH, TensorBoardCallback, compu
 
 
 if __name__ == "__main__":
-    seed_everything(SEED)
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="monologg/kobigbird-bert-base")
     parser.add_argument("--mode", type=str, help="train, test, or inference", default="train")
@@ -32,12 +31,13 @@ if __name__ == "__main__":
     parser.add_argument("--tag", type=str, help="tensorboard and output tag", default="None")
 
     parser.add_argument("--case_multiplier", type=int, default=2)
-    parser.add_argument("--epoch", type = int, default=3)
+    parser.add_argument("--epoch", type = int, default=5)
 
-    parser.add_argument("--method",type=str,help="baseline or case-augmentation or case-concat-augmentation",default="baseline",)
+    parser.add_argument("--method", type=str, help="baseline or case-augmentation or case-concat-augmentation or rule-augmentation", default="baseline")
 
     # biencoder method
     parser.add_argument("--biencoder_method",type=str,help="cosine or linear",default="cosine")
+    parser.add_argument("--seed",type=int,help="seed",default=42)
 
     # Phase 1a: loss selection for bi-encoder (default is original GReX loss)
     parser.add_argument("--biencoder_loss", type=str, default="bce", choices=["bce", "infonce"],
@@ -71,6 +71,9 @@ if __name__ == "__main__":
     args.mini_laws = args.subset_laws
     args.mini_seed = args.subset_seed
 
+    seed_everything(args.seed)
+
+
     case_multiplier = args.case_multiplier
     model_name = args.model
     tag = args.tag
@@ -94,9 +97,6 @@ if __name__ == "__main__":
             model.encoder.gradient_checkpointing_enable()
         print("[INFO] gradient checkpointing enabled (use_reentrant=False)")
 
-    if args.method == "case-augmentation" or args.method == "case-concat-augmentation":
-        from src.methods.case_augmentation.prompt import case_cache_start, case_cache_end
-        case_cache_start()
 
     # early-load: sampling happens while reading the file, do not load 100% then slice
     if args.subset_ratio is not None:
@@ -122,15 +122,24 @@ if __name__ == "__main__":
         args.epoch = 1
         epoch = 1
 
-
-    # Add 'case_idx' column to DataFrames
+    # Add 'case_idx' and 'rule_idx' columns to DataFrames
     train_df = train_df.with_columns(pl.lit(0).alias("case_idx"))
     test_df = test_df.with_columns(pl.lit(0).alias("case_idx"))
     val_df = val_df.with_columns(pl.lit(0).alias("case_idx"))
+    if "rule" in args.method:
+        train_df = train_df.with_columns(pl.lit(0).alias("rule_idx"))
+        test_df = test_df.with_columns(pl.lit(0).alias("rule_idx"))
+        val_df = val_df.with_columns(pl.lit(0).alias("rule_idx"))
+
     original_train_df = train_df.clone()
     if "case" in args.method and case_multiplier > 1:
         for i in range(1, case_multiplier):
             temp_df = original_train_df.clone().with_columns(pl.lit(i).alias("case_idx"))
+            train_df = pl.concat([train_df, temp_df], how="vertical")
+
+    elif "rule" in args.method and case_multiplier > 1:
+        for i in range(1, case_multiplier):
+            temp_df = original_train_df.clone().with_columns(pl.lit(i).alias("rule_idx"))
             train_df = pl.concat([train_df, temp_df], how="vertical")
 
     # Modify the NLIDataset to work with your data format
@@ -169,6 +178,7 @@ if __name__ == "__main__":
                 hypothesis = row["article2"]
             label = row["answer"]
             label = 1 if label else 0  # True -> 1, False -> 0
+            
 
             encoding_a = self.tokenizer.encode_plus(
                 text=premise,
@@ -290,13 +300,13 @@ if __name__ == "__main__":
     # val_dataset.print_label_counts()
 
     training_args = TrainingArguments(
-        output_dir=f"./outputs/LACD-bi/small-fine-tune/{tag}",  # Replaced
+        output_dir=f"./outputs/LACD-bi/small-fine-tune/{tag}",
         num_train_epochs=epoch,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         warmup_steps=500,
         weight_decay=0,
-        logging_dir=f"./outputs/LACD-bi/small-fine-tune/{tag}",  # Replaced
+        logging_dir=f"./outputs/LACD-bi/small-fine-tune/{tag}",
         logging_steps=10,
         eval_strategy="steps",
         eval_steps=20 if not args.debug else 5,
@@ -304,7 +314,7 @@ if __name__ == "__main__":
         save_steps=20 if not args.debug else 5,
         save_total_limit=1,
         load_best_model_at_end=True,
-        metric_for_best_model="eval_roc_auc",  # Use roc_auc as metric
+        metric_for_best_model="eval_roc_auc",
         greater_is_better=True,
         report_to="tensorboard",
         fp16=args.fp16,
@@ -464,3 +474,5 @@ if __name__ == "__main__":
 
     if args.method == "case-augmentation" or args.method == "case-concat-augmentation":
         case_cache_end()
+    elif args.method == "rule-augmentation":
+        rule_cache_end()
