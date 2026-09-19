@@ -13,6 +13,7 @@ class ArticleNetwork:
         subset_seed=42,
         mini_laws=None,
         mini_seed=None,
+        load_edges=True,
     ):
         # Dictionary to store the network (adjacency list)
         self.article_network = {}
@@ -37,7 +38,11 @@ class ArticleNetwork:
 
         # Load all articles from laws_html.jsonl
         self._load_nodes(laws_path)
-        self._load_edges(law_link_path)
+        # Edge adjacency is skipped when only the node list is needed
+        # (e.g. corpus filtering in retrieval mode): saves a full law_link parse.
+        self.edges_loaded = bool(load_edges)
+        if load_edges:
+            self._load_edges(law_link_path)
 
     def _load_nodes(self, laws_path):
         # Early-load: compute degree first (if subset_laws), then stream laws.csv and keep only the subset.
@@ -144,6 +149,11 @@ class ArticleNetwork:
 
     def create_edge_index(self):
         """Create edge index from the article network"""
+        if not getattr(self, "edges_loaded", True):
+            raise RuntimeError(
+                "create_edge_index() called on an ArticleNetwork built with load_edges=False; "
+                "rebuild with load_edges=True for GNN use."
+            )
         edge_index = [[], []]  # List to store the source and target of edges
 
 

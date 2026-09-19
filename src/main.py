@@ -307,7 +307,7 @@ if __name__ == "__main__":
     # tfidf/bm25 never consume article_network, so they stay skipped.
     needs_nodes = needs_graph or (args.subset_laws is not None and args.retrieval_method == "retrieval")
     if needs_nodes:
-        article_network = ArticleNetwork(edge_way=args.gnn_edge_way, subset_laws=args.subset_laws, subset_seed=args.subset_seed)
+        article_network = ArticleNetwork(edge_way=args.gnn_edge_way, subset_laws=args.subset_laws, subset_seed=args.subset_seed, load_edges=needs_graph)
     if needs_graph:
         edge_index_tensor = article_network.create_edge_index()
         edge_index_tensor = edge_index_tensor.to(device)
