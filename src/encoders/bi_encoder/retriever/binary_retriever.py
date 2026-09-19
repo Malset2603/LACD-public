@@ -233,11 +233,14 @@ def binary_retriever(
         # background tokenization threads are worth building later).
         t_tok = t_h2d = t_fwd = t_d2h = t_add = 0.0
         n_d2h = n_add = 0
-        # Length bucketing: encode in ascending char-length order so
-        # padding="longest" batches stay tight (measured ~3.4x fewer forward
-        # tokens on laws.csv). Triples (doc, embedding, id) keep their original
-        # positional ids, so DB content and resume logic are order-independent.
-        order = sorted(missing, key=lambda i: len(all_articles[i]))
+        # Length bucketing (DESCENDING): homogeneous lengths keep
+        # padding="longest" batches tight (measured ~3.4x fewer forward tokens
+        # on laws.csv), while peak-first ordering is allocator-friendly: the
+        # largest blocks are cached up front and reused by shrinking batches,
+        # so reserved memory stays flat instead of ballooning monotonically.
+        # Triples (doc, embedding, id) keep their original positional ids, so
+        # DB content and resume logic are order-independent.
+        order = sorted(missing, key=lambda i: len(all_articles[i]), reverse=True)
         ptr = 0
         pbar = tqdm(total=len(order))
         while ptr < len(order):
@@ -302,6 +305,10 @@ def binary_retriever(
                     embeddings=[e.tolist() for e in block],
                     ids=list(pending_ids),
                 )
+                # Reclaim allocator-held blocks each chunk: with shrinking batch
+                # sizes ahead, cached giants would otherwise sit reserved.
+                if use_cuda:
+                    torch.cuda.empty_cache()
                 t_add += time.perf_counter() - _t5
                 n_add += 1
                 del pending_docs[:]
