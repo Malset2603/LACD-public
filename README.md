@@ -166,6 +166,11 @@ python run_pipeline.py --exp grex-10k --subset_laws 10000 --dry_run
 Outputs are collected under `--output_dir` (default `./outputs/{exp}`) as `metrics-bi.json`, `metrics-cross.json`, `metrics-retrieval.json`, and aggregated `summary.json`.
 
 > **Eval throughput tuning (Steps 2 & 4):** VRAM scales with `eval_batch_size × max_length`. Inference needs no gradients, so `--eval_batch_size` defaults to 32 (decoupled from training `--batch_size`); on OOM the Chroma encoder halves the batch permanently and retries without scaling back up. Guide: 2GB VRAM → `--eval_batch_size 8 --max_length 512`; 24GB → `--eval_batch_size 64 --max_length 1024`. `--fp16_eval` enables fp16 autocast for retrieval encoding (CUDA only; verify recall parity before paper runs).
+>
+> **Chroma build resume vs rebuild:** Step 2 streams each encoded chunk to the DB immediately, so an interrupted build resumes on rerun (only missing ids are encoded). Use `--force_rebuild` only when the existing content is suspect (e.g., corpus changed) — it wipes the collection and rebuilds from scratch:
+> ```bash
+> python run_pipeline.py --exp grex-10k --subset_laws 10000 --steps 2 --force_rebuild
+> ```
 
 ### ReX by synthetic C
 

@@ -78,6 +78,7 @@ def main():
     parser.add_argument("--eval_batch_size", type=int, default=None, help="Batch size for Chroma DB build and retrieval/eval (default: 32, decoupled from training --batch_size since inference needs no gradients)")
     parser.add_argument("--fp16", action="store_true", help="Enable fp16 (training Steps 1 & 3, plus retrieval encoding in Steps 2 & 4 via --fp16_eval)")
     parser.add_argument("--fp16_eval", action="store_true", help="Enable fp16 autocast for retrieval encoding in Steps 2 & 4 (CUDA only; verify recall parity first)")
+    parser.add_argument("--force_rebuild", action="store_true", help="Wipe the Chroma collection and rebuild from scratch in Steps 2 & 4 (use when content is suspect; partial DBs otherwise resume)")
     parser.add_argument("--gradient_checkpointing", action="store_true", help="Enable gradient checkpointing to save VRAM")
     parser.add_argument("--top_k", type=int, default=10, help="Top-K for retrieval and eval")
     # GReX / ReX expansion options (default: 'rex2' for full GReX method)
@@ -159,6 +160,8 @@ def main():
         ] + subset_args()
         if args.fp16 or args.fp16_eval:
             cmd.append("--fp16_eval")
+        if args.force_rebuild:
+            cmd.append("--force_rebuild")
         run_cmd(cmd, dry_run=args.dry_run)
 
     # Step 3: Cross-encoder + GNN
@@ -200,6 +203,8 @@ def main():
         ] + subset_args()
         if args.fp16 or args.fp16_eval:
             cmd.append("--fp16_eval")
+        if args.force_rebuild:
+            cmd.append("--force_rebuild")
         run_cmd(cmd, dry_run=args.dry_run)
 
     # Step 5: Eval

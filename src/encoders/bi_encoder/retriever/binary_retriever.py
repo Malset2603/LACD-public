@@ -81,6 +81,7 @@ def binary_retriever(
     article_network=None,
     max_length=None,
     fp16=False,
+    force_rebuild=False,
     **kwargs
 ):
     """
@@ -99,6 +100,9 @@ def binary_retriever(
         max_length: Optional cap for tokenizer sequence length (None = legacy
             module cap MAX_TOKEN_LENGTH, always bounded by tokenizer.model_max_length).
         fp16: Enable fp16 autocast for encoding (CUDA only, no-op otherwise).
+        force_rebuild: Wipe all existing docs and rebuild from scratch
+            (for suspect content, e.g. corpus changed; partial DBs are
+            otherwise resumed, not rebuilt).
 
     Returns:
         tuple (pooled_output, top_k_articles)
@@ -164,6 +168,14 @@ def binary_retriever(
     # prior GPU work. Ids are positional (str(idx)), so a restart encodes only
     # ids missing from the collection instead of silently proceeding with a
     # partial DB (the old count()==0 guard did the latter).
+    if force_rebuild:
+        try:
+            _wipe_ids = chroma_collection.get()["ids"]
+        except Exception:
+            _wipe_ids = []
+        if _wipe_ids:
+            chroma_collection.delete(ids=list(_wipe_ids))
+            tqdm.write(f"[REBUILD] wiped {len(_wipe_ids)} existing docs; rebuilding from scratch")
     all_articles = laws_df["contents"].to_list()
     n_expected = len(all_articles)
     existing_ids = set()
