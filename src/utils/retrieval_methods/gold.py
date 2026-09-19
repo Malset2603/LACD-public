@@ -6,16 +6,22 @@ CONTENTS = 'contents'
 
 def article_dictionary_list(file_path = './data/database/laws.csv'):
     import pandas as pd
-    global article_df
-    
-    
+    global article_df, title_to_content
+
+
+
     article_df = pd.read_csv(file_path, header=0)
-    return 
+    # O(1) title -> contents index built once (raw titles as keys to preserve
+    # exact match semantics; first-wins mirrors dataframe order on duplicates).
+    title_to_content = {}
+    for t, c in zip(article_df[ARTICLE_TITLE].tolist(), article_df[CONTENTS].tolist()):
+        title_to_content.setdefault(t, c)
+    return
 
 def gold_retriever(retrieval_article_set):
-    global article_df
+    global title_to_content
 
-    return article_df[article_df[ARTICLE_TITLE].isin(retrieval_article_set)].contents.tolist()
+    return [title_to_content[t] for t in retrieval_article_set if t in title_to_content]
 
 
 if __name__ == "__main__":
