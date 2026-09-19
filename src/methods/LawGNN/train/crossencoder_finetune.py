@@ -182,14 +182,15 @@ if __name__ == "__main__":
     # Model initialization
 
     # Build vector table sized to total nodes (not max edge index) to include isolated nodes.
+    # Single bulk H2D transfer: assemble the full matrix on CPU first instead of
+    # N individual GPU allocations plus a second full copy in torch.stack.
     num_nodes = len(article_network.all_article_keys)
-    vectors_list = []
-    for idx in range(num_nodes):
-        if idx in collection_dict.keys():
-            vectors_list.append(torch.tensor(collection_dict[idx]["embedding"], dtype=torch.float32).to(device))
-        else:
-            vectors_list.append(torch.zeros(embedding_size, dtype=torch.float32).to(device))
-    vector_tensor = torch.stack(vectors_list).to(device)
+    vector_matrix = np.zeros((num_nodes, embedding_size), dtype=np.float32)
+    for idx, entry in collection_dict.items():
+        emb = entry.get("embedding", None)
+        if 0 <= idx < num_nodes and emb is not None:
+            vector_matrix[idx] = emb
+    vector_tensor = torch.from_numpy(vector_matrix).to(device)
 
     # Initialize GNN Bi-Encoder model using dynamic embedding size
     if gnn_method == "gcn":
