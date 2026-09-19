@@ -57,7 +57,8 @@ def find_top_conflicts(article, model, tokenizer, chroma_collection, top_k=10, i
     results = chroma_collection.query(
         query_embeddings=[pooled_output.tolist()],
         n_results=top_k,
-        include=["embeddings", "documents"]
+        # documents only: returned embeddings were deserialized then discarded.
+        include=["documents"]
     )
     top_k_articles = results["documents"][0]
 
