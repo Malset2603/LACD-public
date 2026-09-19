@@ -80,7 +80,9 @@ def main():
     parser.add_argument("--fp16_eval", action="store_true", help="Enable fp16 autocast for retrieval encoding in Steps 2 & 4 (CUDA only; verify recall parity first)")
     parser.add_argument("--force_rebuild", action="store_true", help="Wipe the Chroma collection and rebuild from scratch in Steps 2 & 4 (use when content is suspect; partial DBs otherwise resume)")
     parser.add_argument("--gradient_checkpointing", action="store_true", help="Enable gradient checkpointing to save VRAM")
-    parser.add_argument("--top_k", type=int, default=10, help="Top-K for retrieval and eval")
+    parser.add_argument("--top_k", type=int, default=10, help="Top-K cutoff for retrieval evaluation in Step 5")
+    parser.add_argument("--eval_ks", type=str, default="5,10,50", help="Comma-separated cutoffs for nDCG/Recall/F1 in Step 5 (default: 5,10,50)")
+    parser.add_argument("--biencoder_top_k", type=int, default=150, help="Top-K retrieval depth in Step 4 (paper default: 150; lower it, e.g. 5-10, for fast experiments)")
     # GReX / ReX expansion options (default: 'rex2' for full GReX method)
     parser.add_argument("--rex_method", type=str, default="rex2", choices=["rex2", "baseline", "rocchio"],
                         help="ReX expansion method: 'rex2' (GReX full method, default), 'baseline' (Re2+LGNN without expansion), or 'rocchio'")
@@ -199,7 +201,7 @@ def main():
             "--output_dir", output_dir,
             "--batch_size", str(eval_batch_size),
             "--max_length", str(args.max_length),
-            "--biencoder_top_k", str(args.top_k),
+            "--biencoder_top_k", str(args.biencoder_top_k),
         ] + subset_args()
         if args.fp16 or args.fp16_eval:
             cmd.append("--fp16_eval")
@@ -213,6 +215,7 @@ def main():
             sys.executable, "src/eval/retrieval_eval.py",
             "--result_path", output_dir,
             "--top_k", str(args.top_k),
+            "--top_ks", args.eval_ks,
             "--metrics_output", metrics_retrieval,
         ]
         run_cmd(cmd, dry_run=args.dry_run)
