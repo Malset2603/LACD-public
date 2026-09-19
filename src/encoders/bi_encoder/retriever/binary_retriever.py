@@ -218,14 +218,13 @@ def binary_retriever(
         pbar.close()
 
         chunk_size = 1024
-        total_chunks = len(embeddings) // chunk_size + 1
-        embeddings = [e.flatten().tolist() for e in embeddings]
+        total_chunks = (len(embeddings) + chunk_size - 1) // chunk_size
 
         for chunk_idx in tqdm(range(total_chunks)):
             start_idx = chunk_idx * chunk_size
             end_idx = (chunk_idx + 1) * chunk_size
 
-            chunk_embeddings = embeddings[start_idx:end_idx]
+            chunk_embeddings = [e.tolist() for e in embeddings[start_idx:end_idx]]
             chunk_ids = ids[start_idx:end_idx]
             chunk_docs = documents[start_idx:end_idx]
 
