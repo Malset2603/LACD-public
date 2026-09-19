@@ -31,7 +31,7 @@ def load_dataset(jsonl_file, article_network, tokenizer, batch_size=128):
     from transformers import AutoTokenizer
 
     # 준비: query encoder tokenizer와 최대 토큰 길이 설정
-    query_encoder_tokenizer = AutoTokenizer.from_pretrained("klue/roberta-base")
+    query_encoder_tokenizer = AutoTokenizer.from_pretrained("klue/roberta-base", clean_up_tokenization_spaces=True)
     max_length = min(MAX_TOKEN_LENGTH, tokenizer.model_max_length)
     query_max_length = min(MAX_TOKEN_LENGTH, query_encoder_tokenizer.model_max_length)
 

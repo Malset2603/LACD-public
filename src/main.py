@@ -268,7 +268,7 @@ if __name__ == "__main__":
         from src.encoders.bi_encoder.retriever.binary_retriever import binary_retriever
         biencoder_model = torch.load(biencoder_model_path + "/model.pth", weights_only=False)
         biencoder_model.eval()  # 모델을 평가 모드로 설정
-        tokenizer = AutoTokenizer.from_pretrained(biencoder_model_path)
+        tokenizer = AutoTokenizer.from_pretrained(biencoder_model_path, clean_up_tokenization_spaces=True)
 
 
 
@@ -322,7 +322,7 @@ if __name__ == "__main__":
     if args.retrieval_method in ["re2"]:
         reranker = torch.load(crossencoder_model_path + "/model.pth", weights_only=False)
 
-        reranker_tokenizer = AutoTokenizer.from_pretrained(crossencoder_model_path)
+        reranker_tokenizer = AutoTokenizer.from_pretrained(crossencoder_model_path, clean_up_tokenization_spaces=True)
         reranker.eval()
     laws_df = pl.read_csv(laws_csv_path, infer_schema_length=10000)
     context = RetrievalContext(args, reranker, reranker_tokenizer, article_network, chroma_collection, conflicts, chroma_db_name, laws_df=laws_df)

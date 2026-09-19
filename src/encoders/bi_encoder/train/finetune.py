@@ -97,7 +97,7 @@ if __name__ == "__main__":
     model = BiEncoderModel(model_name, method=biencoder_method,
                            loss_type=args.biencoder_loss, infonce_tau=args.infonce_tau)
     print(f"[INFO] BiEncoder loss_type={args.biencoder_loss}, tau={args.infonce_tau} (default is original GReX BCE)")
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, clean_up_tokenization_spaces=True)
     tokenizer.add_special_tokens({"pad_token": "[PAD]"})
     model.encoder.config.pad_token_id = tokenizer.pad_token_id
     if args.gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):

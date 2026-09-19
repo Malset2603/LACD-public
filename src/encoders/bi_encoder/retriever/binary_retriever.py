@@ -121,7 +121,7 @@ def binary_retriever(
             if model_path in _TOKENIZER_CACHE:
                 tokenizer = _TOKENIZER_CACHE[model_path]
             else:
-                tokenizer = AutoTokenizer.from_pretrained(model_path)
+                tokenizer = AutoTokenizer.from_pretrained(model_path, clean_up_tokenization_spaces=True)
                 _TOKENIZER_CACHE[model_path] = tokenizer
         model = loaded_model
 

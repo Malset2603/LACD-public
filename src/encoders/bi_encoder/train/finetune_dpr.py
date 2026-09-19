@@ -183,7 +183,7 @@ if __name__ == "__main__":
     seed_everything(args.seed)
 
     # tokenizer + max_length
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    tokenizer = AutoTokenizer.from_pretrained(args.model, clean_up_tokenization_spaces=True)
     tokenizer.add_special_tokens({"pad_token": "[PAD]"})
     max_len = min(MAX_TOKEN_LENGTH, tokenizer.model_max_length)
 

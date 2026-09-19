@@ -20,7 +20,7 @@ class RuleCrossEncoderModel(torch.nn.Module):
             self.encoder = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
             self.rule_encoder = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
 
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True, clean_up_tokenization_spaces=True)
         self.tokenizer.add_special_tokens({'pad_token': '[PAD]'})
         self.encoder.config.pad_token_id = self.encoder.config.eos_token_id
         self.rule_encoder.config.pad_token_id = self.rule_encoder.config.eos_token_id
@@ -72,7 +72,7 @@ class CrossEncoderModel(torch.nn.Module):
             # Model type should be one of ... error
             from transformers import AutoModelForCausalLM
             self.encoder = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code = True)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True, clean_up_tokenization_spaces=True)
         self.tokenizer.add_special_tokens({'pad_token': '[PAD]'})
         self.encoder.config.pad_token_id = self.encoder.config.eos_token_id
 
