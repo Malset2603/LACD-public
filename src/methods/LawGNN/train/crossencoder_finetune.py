@@ -71,9 +71,18 @@ def load_dataset(jsonl_file, article_network, tokenizer, method="baseline", case
                 label = 1 if data['answer'] else 0  # True -> 1, False -> 0
                 dataset.append((article1_idx, article2_idx, encoding['input_ids'].flatten(), encoding['attention_mask'].flatten(), label))
 
-            
 
-            
+
+
+    # Fail fast with a clear message instead of a cryptic transformers crash:
+    # with small --subset_laws, most pairs touch out-of-subset articles and
+    # are dropped above, which can leave an empty (or near-empty) dataset.
+    if len(dataset) == 0:
+        raise ValueError(
+            f"[SUBSET] {jsonl_file}: 0/{len(all_lines)} pairs survived graph filtering "
+            f"({key_error_cnt} dropped as out-of-subset). Increase --subset_laws or drop --subset_ratio."
+        )
+    print(f"[SUBSET] {jsonl_file}: kept {len(dataset)}/{len(all_lines)} pairs ({key_error_cnt} out-of-subset dropped)")
     return dataset
 
 # Example execution
