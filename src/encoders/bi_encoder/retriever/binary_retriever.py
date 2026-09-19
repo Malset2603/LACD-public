@@ -159,20 +159,34 @@ def binary_retriever(
         from src.utils.encoder.biencoder_utils import load_chromaDB_byname
         chroma_collection = load_chromaDB_byname(chroma_collection)
 
-    # 5. Populate Chroma DB if empty
-    if chroma_collection.count() == 0:
-        ids = []
-        all_articles = laws_df["contents"].to_list()
-        for idx in range(len(all_articles)):
-            ids.append(str(idx))
+    # 5. Populate Chroma DB (streaming + crash-resume).
+    # Each encoded 1024-chunk is added immediately so a crash no longer discards
+    # prior GPU work. Ids are positional (str(idx)), so a restart encodes only
+    # ids missing from the collection instead of silently proceeding with a
+    # partial DB (the old count()==0 guard did the latter).
+    all_articles = laws_df["contents"].to_list()
+    n_expected = len(all_articles)
+    existing_ids = set()
+    try:
+        n_present = chroma_collection.count()
+    except Exception:
+        n_present = 0
+    if n_present > 0:
+        try:
+            existing_ids = set(chroma_collection.get()["ids"])
+        except Exception:
+            existing_ids = set()
+    missing = [i for i in range(n_expected) if str(i) not in existing_ids]
+    if n_expected > 0 and not missing and n_present > n_expected:
+        tqdm.write(f"[CHROMA] collection holds {n_present} docs for {n_expected} corpus rows; reusing as-is")
+    if n_expected > 0 and missing:
+        if existing_ids:
+            tqdm.write(f"[RESUME] {n_expected - len(missing)}/{n_expected} docs present; encoding {len(missing)} missing")
 
         max_length = min(max_length or MAX_TOKEN_LENGTH, tokenizer.model_max_length) if tokenizer is not None else (max_length or MAX_TOKEN_LENGTH)
         use_cuda = torch.cuda.is_available()
         # fp16 autocast scope (CUDA only; no-op otherwise, never mutates the model)
         autocast_ctx = torch.autocast(device_type="cuda" if use_cuda else "cpu", dtype=torch.float16, enabled=bool(fp16) and use_cuda)
-
-        embeddings = []
-        documents = []
 
         # Adaptive batching with permanent step-down: on CUDA OOM, halve the
         # batch size globally (never scale back up) and re-split the failed
@@ -181,19 +195,22 @@ def binary_retriever(
         # OOM surfaces as torch.cuda.OutOfMemoryError (a RuntimeError subclass)
         # or plain RuntimeError on some builds, hence the message filter.
         enc_batch_size = max(1, batch_size)
-        # D2H transfers are batched per chunk (not per encode batch) to cut
-        # device synchronizations ~32x; chunk_size matches the chroma.add
-        # chunking below so GPU residency stays bounded (~3MB per chunk).
+        # D2H transfers and chroma adds are batched per chunk (not per encode
+        # batch) to cut device synchronizations ~32x; GPU/CPU residency stays
+        # bounded (~3MB + one chunk of rows) because buffers flush every add.
         chunk_size = 1024
         gpu_buf = []
+        pending_docs = []
+        pending_ids = []
         # Stage 0 instrumentation: per-stage encode timings (decides whether
         # background tokenization threads are worth building later).
-        t_tok = t_h2d = t_fwd = t_d2h = 0.0
-        n_d2h = 0
-        batch_start = 0
-        pbar = tqdm(total=len(all_articles))
-        while batch_start < len(all_articles):
-            batch_articles = all_articles[batch_start:batch_start + enc_batch_size]
+        t_tok = t_h2d = t_fwd = t_d2h = t_add = 0.0
+        n_d2h = n_add = 0
+        ptr = 0
+        pbar = tqdm(total=len(missing))
+        while ptr < len(missing):
+            batch_idx = missing[ptr:ptr + enc_batch_size]
+            batch_articles = [all_articles[i] for i in batch_idx]
             _t0 = time.perf_counter()
             batch_inputs = tokenizer(
                 batch_articles,
@@ -233,36 +250,33 @@ def binary_retriever(
             t_h2d += _t2 - _t1
             t_fwd += _t3 - _t2
             gpu_buf.append(pooled_gpu)
-            documents.extend(batch_articles)
-            batch_start += len(batch_articles)
-            # Flush to CPU per chunk (or at the tail) instead of per batch.
-            if len(gpu_buf) >= chunk_size or batch_start >= len(all_articles):
+            pending_docs.extend(batch_articles)
+            pending_ids.extend(str(i) for i in batch_idx)
+            ptr += len(batch_idx)
+            # Flush (D2H + chroma add) per chunk or at the tail, then free all
+            # stage buffers so RAM stays flat regardless of corpus size.
+            if len(gpu_buf) >= chunk_size or ptr >= len(missing):
                 _t4 = time.perf_counter()
-                embeddings.extend(torch.stack(gpu_buf).cpu().numpy())
+                block = torch.stack(gpu_buf).cpu().numpy()
                 t_d2h += time.perf_counter() - _t4
                 n_d2h += 1
                 del gpu_buf[:]
-            pbar.update(len(batch_articles))
+                _t5 = time.perf_counter()
+                chroma_collection.add(
+                    documents=list(pending_docs),
+                    embeddings=[e.tolist() for e in block],
+                    ids=list(pending_ids),
+                )
+                t_add += time.perf_counter() - _t5
+                n_add += 1
+                del pending_docs[:]
+                del pending_ids[:]
+            pbar.update(len(batch_idx))
         pbar.close()
-        t_sum = max(t_tok + t_h2d + t_fwd + t_d2h, 1e-9)
+        t_sum = max(t_tok + t_h2d + t_fwd + t_d2h + t_add, 1e-9)
         tqdm.write(f"[ENCODE] tok={t_tok:.1f}s ({t_tok/t_sum:.0%}) h2d={t_h2d:.1f}s ({t_h2d/t_sum:.0%}) "
-                   f"fwd={t_fwd:.1f}s ({t_fwd/t_sum:.0%}) d2h={t_d2h:.1f}s ({t_d2h/t_sum:.0%}, {n_d2h} transfers)")
-
-        total_chunks = (len(embeddings) + chunk_size - 1) // chunk_size
-
-        for chunk_idx in tqdm(range(total_chunks)):
-            start_idx = chunk_idx * chunk_size
-            end_idx = (chunk_idx + 1) * chunk_size
-
-            chunk_embeddings = [e.tolist() for e in embeddings[start_idx:end_idx]]
-            chunk_ids = ids[start_idx:end_idx]
-            chunk_docs = documents[start_idx:end_idx]
-
-            chroma_collection.add(
-                documents=chunk_docs,
-                embeddings=chunk_embeddings,
-                ids=chunk_ids,
-            )
+                   f"fwd={t_fwd:.1f}s ({t_fwd/t_sum:.0%}) d2h={t_d2h:.1f}s ({t_d2h/t_sum:.0%}, {n_d2h} transfers) "
+                   f"add={t_add:.1f}s ({t_add/t_sum:.0%}, {n_add} chunks)")
 
     # 6. Retrieve top conflicts
     article_vector, top_conflicts = find_top_conflicts(
