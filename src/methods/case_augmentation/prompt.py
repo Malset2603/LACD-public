@@ -51,8 +51,26 @@ import json
 
 from src.utils.utils import article_key_function
 # ./data/database/generated_case_cache/prompt-base-full-law/case_cache.jsonl
+
+# O(1) cache index: article_key -> [case, ...] in file order.
+_case_index = {}
+
+def _alter_key(article_key):
+    # Identical expression to the legacy filter logic: swap the two key parts.
+    return article_key.split("-")[1] + "-" + article_key.split("-")[0]
+
+def _index_row(article_key, case):
+    # Register under both orientations so a single lookup is equivalent to
+    # the legacy filter (key OR alter) in file order. Assumes pair keys have
+    # exactly two parts and single keys contain no "-" (as the old code did).
+    keys = {article_key}
+    if "-" in article_key:
+        keys.add(_alter_key(article_key))
+    for k in keys:
+        _case_index.setdefault(k, []).append(case)
+
 def case_cache_start(cache_path= "./data/database/generated_case_cache/prompt-base/case_cache.jsonl"):
-    global cache_df
+    global cache_df, _case_index
 
         # Load the cache DataFrame
     try:
@@ -63,6 +81,11 @@ def case_cache_start(cache_path= "./data/database/generated_case_cache/prompt-ba
     except Exception:
         # If the cache file is empty or doesn't exist, create an empty DataFrame
         cache_df = pl.DataFrame(schema={"article": pl.Utf8, "case": pl.Utf8, "article_key": pl.Utf8})
+
+    # (Re)build the O(1) index from the loaded frame.
+    _case_index = {}
+    for _row in cache_df.iter_rows(named=True):
+        _index_row(_row["article_key"], _row["case"])
 
     # return cache_df
 
@@ -80,18 +103,14 @@ def generate_case(model, client, article: str, use_case_cache=True, article_key=
         article_key = article_key_function(article)
         # print(article_key)
     if use_case_cache:
-        # Check if the article exists in the cache
-
-        if "-" in article_key:
-            alter_article_key = article_key.split("-")[1]+"-"+article_key.split("-")[0]
-            matching_rows = cache_df.filter((pl.col("article_key") == article_key) | (pl.col("article_key") == alter_article_key))
-        else:
-            matching_rows = cache_df.filter(pl.col("article_key") == article_key)
+        # Check if the article exists in the cache (O(1) index lookup,
+        # equivalent to the legacy filter on key OR swapped key).
+        bucket = _case_index.get(article_key, [])
 
         # 0은 아님.
-        if matching_rows.height > case_idx:
+        if len(bucket) > case_idx:
             # Return the cached case if a match is found
-            return matching_rows.row(case_idx, named=True)["case"]
+            return bucket[case_idx]
         else:
             # 이러면 Generate
             pass
@@ -113,6 +132,8 @@ def generate_case(model, client, article: str, use_case_cache=True, article_key=
         # Append the new article and generated case to the cache DataFrame
         new_entry = pl.DataFrame([{"article": article, "case": generated_case_text, "article_key": article_key}])
         cache_df = pl.concat([cache_df, new_entry], how="vertical")
+        # Keep the O(1) index in sync so later rows in the same run see it.
+        _index_row(article_key, generated_case_text)
 
         
     return generated_case_text
