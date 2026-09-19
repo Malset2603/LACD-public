@@ -50,7 +50,7 @@ def retrieve_top_conflicts(query, context, threashold=0):
 
     if context.args.retrieval_method == "retrieval":
 
-        article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer, max_length=retriever_max_length, fp16=retriever_fp16, force_rebuild=retriever_force_rebuild)
+        article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer, max_length=retriever_max_length, fp16=retriever_fp16, force_rebuild=retriever_force_rebuild, article_network=context.article_network)
 
 
     elif context.args.retrieval_method == "re2":
@@ -80,7 +80,7 @@ def retrieve_top_conflicts(query, context, threashold=0):
 
         elif context.args.rex_method == "rex2":
 
-            article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, top_k=args.biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer, max_length=retriever_max_length, fp16=retriever_fp16, force_rebuild=retriever_force_rebuild)
+            article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, top_k=args.biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer, max_length=retriever_max_length, fp16=retriever_fp16, force_rebuild=retriever_force_rebuild, article_network=context.article_network)
 
             top_conflicts_I = top_conflicts[:args.biencoder_top_k]
 
@@ -141,7 +141,7 @@ def retrieve_top_conflicts(query, context, threashold=0):
 
         elif context.args.rex_method == "baseline":
             
-            article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer, max_length=retriever_max_length, fp16=retriever_fp16, force_rebuild=retriever_force_rebuild)
+            article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer, max_length=retriever_max_length, fp16=retriever_fp16, force_rebuild=retriever_force_rebuild, article_network=context.article_network)
 
             final_conflicts = cross_retriever(
                 query, 
@@ -296,17 +296,25 @@ if __name__ == "__main__":
 
     # from src.utils.utils import article_key_function
 
-    # GNN graph is only needed by the re2 path (cross_retriever); retrieval/
-    # tfidf/bm25 modes never touch article_network, so skip the expensive
-    # law_link parsing + edge tensor H2D transfer for build-only runs.
+    # ArticleNetwork nodes are needed by the re2 path (cross_retriever) and by
+    # subset runs (binary_retriever filters the Chroma corpus to the subset via
+    # article_network.all_article_keys); retrieval/tfidf/bm25 on the full corpus
+    # need neither. Edge tensors are only needed by the GNN in the re2 path.
     article_network = None
     edge_index_tensor = None
-    if args.retrieval_method == "re2":
+    needs_graph = args.retrieval_method == "re2"
+    # Nodes are also needed to filter the Chroma corpus in retrieval mode;
+    # tfidf/bm25 never consume article_network, so they stay skipped.
+    needs_nodes = needs_graph or (args.subset_laws is not None and args.retrieval_method == "retrieval")
+    if needs_nodes:
         article_network = ArticleNetwork(edge_way=args.gnn_edge_way, subset_laws=args.subset_laws, subset_seed=args.subset_seed)
+    if needs_graph:
         edge_index_tensor = article_network.create_edge_index()
         edge_index_tensor = edge_index_tensor.to(device)
         if args.subset_laws is not None:
             print(f"[SUBSET] ArticleNetwork nodes {len(article_network.all_article_keys)} subset_laws={args.subset_laws} edges {edge_index_tensor.shape[1]//2}")
+    elif args.subset_laws is not None:
+        print(f"[SUBSET] ArticleNetwork nodes {len(article_network.all_article_keys)} subset_laws={args.subset_laws} (nodes only, no edge tensor)")
 
 
     reranker = None
