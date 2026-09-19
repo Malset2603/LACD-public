@@ -218,10 +218,15 @@ def binary_retriever(
         # background tokenization threads are worth building later).
         t_tok = t_h2d = t_fwd = t_d2h = t_add = 0.0
         n_d2h = n_add = 0
+        # Length bucketing: encode in ascending char-length order so
+        # padding="longest" batches stay tight (measured ~3.4x fewer forward
+        # tokens on laws.csv). Triples (doc, embedding, id) keep their original
+        # positional ids, so DB content and resume logic are order-independent.
+        order = sorted(missing, key=lambda i: len(all_articles[i]))
         ptr = 0
-        pbar = tqdm(total=len(missing))
-        while ptr < len(missing):
-            batch_idx = missing[ptr:ptr + enc_batch_size]
+        pbar = tqdm(total=len(order))
+        while ptr < len(order):
+            batch_idx = order[ptr:ptr + enc_batch_size]
             batch_articles = [all_articles[i] for i in batch_idx]
             _t0 = time.perf_counter()
             batch_inputs = tokenizer(
@@ -267,7 +272,7 @@ def binary_retriever(
             ptr += len(batch_idx)
             # Flush (D2H + chroma add) per chunk or at the tail, then free all
             # stage buffers so RAM stays flat regardless of corpus size.
-            if len(gpu_buf) >= chunk_size or ptr >= len(missing):
+            if len(gpu_buf) >= chunk_size or ptr >= len(order):
                 _t4 = time.perf_counter()
                 block = torch.stack(gpu_buf).cpu().numpy()
                 t_d2h += time.perf_counter() - _t4
