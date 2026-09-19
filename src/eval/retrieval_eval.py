@@ -177,8 +177,101 @@ def evaluate_single(result_path, rows, top_k=5, biencoder_top_k=10, gt_index=Non
 
 
 # ---------------------------------------------------------------------------
-# Benchmark Table Generation (nDCG@k, Recall@k, F1@k with Highlighting)
+# Multi-k retrieval metrics (nDCG@k, Recall@k, F1@k) shared by benchmark
+# table mode and pipeline eval mode. Relevance comes from true_dicts
+# (query -> true conflicting articles), identical formulas in both modes.
 # ---------------------------------------------------------------------------
+def parse_ks(ks_str):
+    """Parse '5,10,50' -> [5, 10, 50] (deduped, sorted, positive ints)."""
+    ks = []
+    for part in str(ks_str).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        k = int(part)
+        if k <= 0:
+            raise ValueError(f"cutoffs must be positive ints, got {ks_str!r}")
+        if k not in ks:
+            ks.append(k)
+    if not ks:
+        raise ValueError(f"no valid cutoffs in {ks_str!r}")
+    return sorted(ks)
+
+
+def build_binary_markings(results, true_dicts, true_dicts_with_known_conflicts, article_network=None):
+    """Mark each retrieved article as 1/0 per query (same rule as benchmark mode).
+
+    article_network is only needed for type breakdowns; scoring uses the binary
+    markings alone, so None skips types without changing any metric.
+    """
+    from src.methods.ReX.hybrid_result import classify_type
+
+    markings = []
+    for r in results:
+        query = r["article_to_check"]
+        instance = {"article_to_check": query, "articles_as_binary": []}
+        true_articles = set(true_dicts.get(query, []))
+        known = set(true_dicts_with_known_conflicts.get(query, []))
+        types = []
+        for a in r["articles"]:
+            if a in known and a not in true_articles:
+                continue
+            instance["articles_as_binary"].append(1 if a in true_articles else 0)
+            if article_network is not None:
+                types.append(classify_type(query, a, article_network) if a in true_articles else "NONE")
+        instance["articles_as_types"] = types
+        markings.append(instance)
+    return markings
+
+
+def score_at_ks(markings, true_dicts, ks):
+    """Score binary markings at each cutoff (formulas identical to benchmark mode)."""
+    from src.methods.ReX.hybrid_result import compute_ndcg
+
+    out = {}
+    n_samples = len(markings) if len(markings) > 0 else 1
+    for k in ks:
+        total_true_positives = 0
+        total_retrieved = 0
+        recall = 0.0
+        total_ndcg = 0.0
+        for r in markings:
+            binary_list = r["articles_as_binary"]
+            topk_list = binary_list[:k]
+            total_true_positives += sum(topk_list)
+            total_retrieved += len(topk_list)
+            denom = len(true_dicts.get(r["article_to_check"], []))
+            if denom > 0:
+                recall += sum(topk_list) / denom
+                ideal_binary = [1 for _ in range(denom)] + [0 for _ in range(max(0, k - denom))]
+            else:
+                ideal_binary = [0] * k
+            total_ndcg += compute_ndcg(binary_list, ideal_binary, k)
+        recall = recall / n_samples * 100
+        precision = (total_true_positives / total_retrieved * 100) if total_retrieved > 0 else 0.0
+        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+        ndcg = total_ndcg / n_samples * 100
+        out[str(k)] = {"ndcg": ndcg, "recall": recall, "f1": f1}
+    return out
+
+
+def evaluate_multik_single(result_path, ks, true_dicts=None, true_dicts_with_known_conflicts=None, article_network=None):
+    """nDCG/Recall/F1 at each k in ks for one result file (pipeline eval mode)."""
+    from src.methods.ReX.hybrid_result import build_true_dict, build_true_dict_by_test
+
+    if true_dicts is None:
+        true_dicts_with_known_conflicts = build_true_dict()
+        true_dicts = build_true_dict_by_test()
+    elif true_dicts_with_known_conflicts is None:
+        true_dicts_with_known_conflicts = build_true_dict()
+    results = []
+    with open(result_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                results.append(json.loads(line))
+    markings = build_binary_markings(results, true_dicts, true_dicts_with_known_conflicts, article_network)
+    return score_at_ks(markings, true_dicts, ks)
 def highlight_table(table, header):
     # table: List[List[str or float]]
     # header: List[str]
@@ -221,10 +314,9 @@ def highlight_table(table, header):
 
 
 def evaluate_benchmark_single(result_path, article_network):
-    from src.methods.ReX.hybrid_result import build_true_dict, build_true_dict_by_test, compute_ndcg, classify_type
+    from src.methods.ReX.hybrid_result import build_true_dict, build_true_dict_by_test
 
     top_k = [5, 10, 50]
-    top_k0 = [50]
 
     true_dicts_with_known_conflicts = build_true_dict()
     true_dicts = build_true_dict_by_test()
@@ -241,63 +333,14 @@ def evaluate_benchmark_single(result_path, article_network):
     for q in processed_query:
         all_positives += len(true_dicts.get(q, []))
 
-    table_metrics = {k: {"nDCG": 0.0, "Recall": 0.0, "Retrieval F1": 0.0} for k in top_k}
-
-    for k0 in top_k0:
-        results_as_binary_markings = []
-        all_instances = 0
-
-        true_articles_count = 0
-        for r in tqdm(results, desc=f"Evaluating {os.path.basename(result_path)}"):
-            query = r["article_to_check"]
-            instance = {"article_to_check": query, "articles_as_binary": [], "articles_as_types": []}
-
-            true_articles = set(true_dicts.get(query, []))
-            true_articles_with_known_conflicts = set(true_dicts_with_known_conflicts.get(query, []))
-
-            true_articles_count += len(true_articles)
-            for a in r["articles"]:
-                if a in true_articles_with_known_conflicts and a not in true_articles:
-                    continue
-
-                instance["articles_as_binary"].append(1 if a in true_articles else 0)
-                instance["articles_as_types"].append(
-                    classify_type(query, a, article_network) if a in true_articles else "NONE"
-                )
-            all_instances += len(instance["articles_as_binary"])
-            results_as_binary_markings.append(instance)
-
-        for k in top_k:
-            total_true_positives = 0
-            total_retrieved = 0
-            recall = 0
-            recall_cap = 0
-            total_ndcg = 0.0
-
-            for r in results_as_binary_markings:
-                binary_list = r["articles_as_binary"]
-                topk_list = binary_list[:k]
-                total_true_positives += sum(topk_list)
-                total_retrieved += len(topk_list)
-                denom = len(true_dicts.get(r['article_to_check'], []))
-                if denom > 0:
-                    recall += sum(topk_list) / denom
-                    recall_cap += sum(topk_list) / min(k, denom)
-                    ideal_binary = [1 for _ in range(denom)] + [0 for _ in range(max(0, k - denom))]
-                else:
-                    ideal_binary = [0] * k
-                total_ndcg += compute_ndcg(binary_list, ideal_binary, k)
-
-            n_samples = len(results_as_binary_markings) if len(results_as_binary_markings) > 0 else 1
-            recall = recall / n_samples * 100
-            recall_cap = recall_cap / n_samples * 100
-            precision = (total_true_positives / total_retrieved * 100) if total_retrieved > 0 else 0.0
-            f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
-            ndcg = total_ndcg / n_samples * 100
-
-            table_metrics[k]["nDCG"] = ndcg
-            table_metrics[k]["Recall"] = recall
-            table_metrics[k]["Retrieval F1"] = f1
+    # Shared scoring core (identical formulas; types need the network but do
+    # not affect the metrics, so benchmark passes it for breakdowns).
+    markings = build_binary_markings(results, true_dicts, true_dicts_with_known_conflicts, article_network)
+    scored = score_at_ks(markings, true_dicts, top_k)
+    table_metrics = {
+        k: {"nDCG": scored[str(k)]["ndcg"], "Recall": scored[str(k)]["recall"], "Retrieval F1": scored[str(k)]["f1"]}
+        for k in top_k
+    }
 
     model_name = os.path.basename(result_path).split(".")[0]
     row = [model_name]
@@ -353,6 +396,7 @@ if __name__ == "__main__":
     parser.add_argument("--result_path", type=str, default="./outputs/retrieval_results", help="Path to retrieval result jsonl file or directory (e.g. ./outputs/my_experiment/baseline_gat_baseline_laws10000.jsonl or ./outputs/retrieval_results)")
     parser.add_argument("--ground_truth_path", type=str, default="./data/datasets/LACD-biclassification/train-test-divide-refine/test.jsonl", help="Path to ground truth test.jsonl")
     parser.add_argument("--top_k", type=int, default=5, help="Top-K for recall/precision (default 5)")
+    parser.add_argument("--top_ks", type=str, default=None, help="Comma-separated cutoffs for nDCG/Recall/F1, e.g. '5,10,50' (default: same as --top_k)")
     parser.add_argument("--biencoder_top_k", type=int, default=10, help="Biencoder top-K used during retrieval (for logging only)")
     parser.add_argument("--output_missed", type=str, default=None, help="Optional path to save missed_pairs.jsonl")
     parser.add_argument("--metrics_output", type=str, default=None, help="Optional path to save metrics JSON (e.g. ./outputs/grex-10k-gat/metrics.json); if not provided, metrics are only printed")
@@ -365,6 +409,12 @@ if __name__ == "__main__":
         print(f"[INFO] loaded {len(rows)} ground truth rows from {args.ground_truth_path}")
         # Build O(1) lookup indices once and reuse across all result files
         gt_index = build_ground_truth_index(rows)
+        # Multi-k cutoffs (default: same single --top_k for backward compat)
+        ks = parse_ks(args.top_ks) if args.top_ks else [args.top_k]
+        # Relevance sets for nDCG/Recall/F1, built once and shared
+        from src.methods.ReX.hybrid_result import build_true_dict, build_true_dict_by_test
+        _known_conflicts = build_true_dict()
+        _true_dicts = build_true_dict_by_test()
 
         # resolve result files
         result_files = []
@@ -384,6 +434,8 @@ if __name__ == "__main__":
         all_metrics = []
         for rf in sorted(result_files):
             res = evaluate_single(rf, rows, top_k=args.top_k, biencoder_top_k=args.biencoder_top_k, gt_index=gt_index)
+            res["multi_k"] = evaluate_multik_single(rf, ks, true_dicts=_true_dicts,
+                                                    true_dicts_with_known_conflicts=_known_conflicts)
             all_missed.extend(res["missed_pairs"])
             all_metrics.append({k: v for k, v in res.items() if k != "missed_pairs"})
 
@@ -397,5 +449,5 @@ if __name__ == "__main__":
         if args.metrics_output:
             os.makedirs(os.path.dirname(os.path.abspath(args.metrics_output)) or ".", exist_ok=True)
             with open(args.metrics_output, 'w', encoding='utf-8') as f:
-                json.dump({"top_k": args.top_k, "ground_truth": args.ground_truth_path, "results": all_metrics, "args": vars(args)}, f, ensure_ascii=False, indent=2)
+                json.dump({"top_k": args.top_k, "top_ks": ks, "ground_truth": args.ground_truth_path, "results": all_metrics, "args": vars(args)}, f, ensure_ascii=False, indent=2)
             print(f"[METRICS] saved to {args.metrics_output}")
