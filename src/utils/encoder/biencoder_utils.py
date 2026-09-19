@@ -190,5 +190,7 @@ def load_chromaDB_byname(chroma_db_name):
     import chromadb
     # ChromaDB 클라이언트 초기화 및 인코딩된 법률 저장 또는 불러오기
     client = chromadb.PersistentClient(path="./data/database/chroma_db/" + chroma_db_name)
-    chroma_collection = client.get_or_create_collection("quickstart", metadata={"hnsw:space": "ip"})
+    # No embedding_function: all our adds/queries carry explicit vectors, so the
+    # default ONNX MiniLM would only waste download/RAM/startup (and break offline).
+    chroma_collection = client.get_or_create_collection("quickstart", embedding_function=None, metadata={"hnsw:space": "ip"})
     return chroma_collection
