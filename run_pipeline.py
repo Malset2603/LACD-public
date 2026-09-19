@@ -69,6 +69,7 @@ def main():
     parser.add_argument("--subset_laws", type=int, default=None, help="Subset laws for ArticleNetwork (e.g. 10000); omit for full 79k")
     parser.add_argument("--subset_ratio", type=float, default=None, help="Subset ratio for train/val/test stratified sampling (e.g. 0.15)")
     parser.add_argument("--subset_seed", type=int, default=42, help="Seed for subset sampling")
+    parser.add_argument("--seed", type=int, default=42, help="Seed for model training in Steps 1 & 3 (init, shuffling, balanced sampler)")
     parser.add_argument("--model", type=str, default="monologg/kobigbird-bert-base", help="Bi/cross encoder model")
     parser.add_argument("--gnn_method", type=str, default="gat", choices=["gcn", "graphsage", "gat", "vanilla", "gathybrid", "graphsagehybrid"], help="GNN method")
     parser.add_argument("--epoch", type=int, default=3, help="Epochs for bi and cross training (cross uses this value, the default value is 3)")
@@ -143,6 +144,7 @@ def main():
             "--metrics_output", metrics_bi,
             "--biencoder_loss", args.biencoder_loss,
             "--infonce_tau", str(args.infonce_tau),
+            "--seed", str(args.seed),
         ] + subset_args()
         if args.fp16:
             cmd.append("--fp16")
@@ -178,6 +180,7 @@ def main():
             "--batch_size", str(args.batch_size),
             "--max_length", str(args.max_length),
             "--metrics_output", metrics_cross,
+            "--seed", str(args.seed),
         ] + subset_args()
         if args.fp16:
             cmd.append("--fp16")
