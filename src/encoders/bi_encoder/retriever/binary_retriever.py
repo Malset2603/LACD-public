@@ -181,10 +181,20 @@ def binary_retriever(
         # OOM surfaces as torch.cuda.OutOfMemoryError (a RuntimeError subclass)
         # or plain RuntimeError on some builds, hence the message filter.
         enc_batch_size = max(1, batch_size)
+        # D2H transfers are batched per chunk (not per encode batch) to cut
+        # device synchronizations ~32x; chunk_size matches the chroma.add
+        # chunking below so GPU residency stays bounded (~3MB per chunk).
+        chunk_size = 1024
+        gpu_buf = []
+        # Stage 0 instrumentation: per-stage encode timings (decides whether
+        # background tokenization threads are worth building later).
+        t_tok = t_h2d = t_fwd = t_d2h = 0.0
+        n_d2h = 0
         batch_start = 0
         pbar = tqdm(total=len(all_articles))
         while batch_start < len(all_articles):
             batch_articles = all_articles[batch_start:batch_start + enc_batch_size]
+            _t0 = time.perf_counter()
             batch_inputs = tokenizer(
                 batch_articles,
                 add_special_tokens=True,
@@ -194,14 +204,20 @@ def binary_retriever(
                 truncation=True,
                 return_tensors="pt"
             )
+            _t1 = time.perf_counter()
             input_ids = batch_inputs["input_ids"].to(model.encoder.device)
             attention_mask = batch_inputs["attention_mask"].to(model.encoder.device)
+            _t2 = time.perf_counter()
 
             try:
                 with torch.inference_mode(), autocast_ctx:
                     encoder_to_use = model.passage_encoder if hasattr(model, "passage_encoder") else model.encoder
                     encoded_articles = encoder_to_use(input_ids=input_ids, attention_mask=attention_mask)
-                    pooled_outputs = encoded_articles.last_hidden_state[:, 0, :].cpu().numpy()
+                    # Compact copy of the CLS rows only: [:, 0, :] is a strided
+                    # view pinning the full (B, L, H) output alive, so
+                    # .contiguous() materializes just the rows we keep.
+                    pooled_gpu = encoded_articles.last_hidden_state[:, 0, :].contiguous()
+                _t3 = time.perf_counter()
             except RuntimeError as e:
                 if "out of memory" not in str(e).lower():
                     raise
@@ -213,13 +229,25 @@ def binary_retriever(
                 tqdm.write(f"[OOM] permanent step-down encode batch -> {enc_batch_size}, retrying (never scaling back up)")
                 continue
 
-            embeddings.extend(pooled_outputs)
+            t_tok += _t1 - _t0
+            t_h2d += _t2 - _t1
+            t_fwd += _t3 - _t2
+            gpu_buf.append(pooled_gpu)
             documents.extend(batch_articles)
-            pbar.update(len(batch_articles))
             batch_start += len(batch_articles)
+            # Flush to CPU per chunk (or at the tail) instead of per batch.
+            if len(gpu_buf) >= chunk_size or batch_start >= len(all_articles):
+                _t4 = time.perf_counter()
+                embeddings.extend(torch.stack(gpu_buf).cpu().numpy())
+                t_d2h += time.perf_counter() - _t4
+                n_d2h += 1
+                del gpu_buf[:]
+            pbar.update(len(batch_articles))
         pbar.close()
+        t_sum = max(t_tok + t_h2d + t_fwd + t_d2h, 1e-9)
+        tqdm.write(f"[ENCODE] tok={t_tok:.1f}s ({t_tok/t_sum:.0%}) h2d={t_h2d:.1f}s ({t_h2d/t_sum:.0%}) "
+                   f"fwd={t_fwd:.1f}s ({t_fwd/t_sum:.0%}) d2h={t_d2h:.1f}s ({t_d2h/t_sum:.0%}, {n_d2h} transfers)")
 
-        chunk_size = 1024
         total_chunks = (len(embeddings) + chunk_size - 1) // chunk_size
 
         for chunk_idx in tqdm(range(total_chunks)):
