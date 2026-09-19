@@ -74,7 +74,35 @@ def load_ground_truth(ground_truth_path):
     return normalized
 
 
-def evaluate_single(result_path, rows, top_k=5, biencoder_top_k=10):
+def build_ground_truth_index(rows):
+    """Build O(1) lookup indices from normalized ground-truth rows (output of load_ground_truth).
+
+    Returns {"pair_to_answer": {(k1, k2): answer}, "query_flags": {key: [has_true, has_false]}}.
+    Duplicate pairs keep the FIRST occurrence (matching the old matching_rows[0] semantics).
+    Rows are already key-normalized at load, so no regex is executed here.
+    """
+    pair_to_answer = {}
+    query_flags = {}
+    for r in rows:
+        try:
+            a1, a2, ans = r["article1"], r["article2"], r["answer"]
+        except (KeyError, TypeError):
+            continue
+        pkey = (a1, a2) if a1 <= a2 else (a2, a1)
+        pair_to_answer.setdefault(pkey, ans)
+        for q in (a1, a2):
+            flags = query_flags.get(q)
+            if flags is None:
+                query_flags[q] = [ans is True, ans is False]
+            else:
+                if ans is True:
+                    flags[0] = True
+                elif ans is False:
+                    flags[1] = True
+    return {"pair_to_answer": pair_to_answer, "query_flags": query_flags}
+
+
+def evaluate_single(result_path, rows, top_k=5, biencoder_top_k=10, gt_index=None):
     print(f"==\nresult: {result_path}")
     results = []
     with open(result_path, 'r', encoding='utf-8') as f:
@@ -93,35 +121,42 @@ def evaluate_single(result_path, rows, top_k=5, biencoder_top_k=10):
     missed_pairs = []
     seen_pairs = set()
 
+    # O(1) indices built once (rows are already key-normalized at load, so the
+    # hot loop below performs zero regex calls and zero linear scans).
+    if gt_index is None:
+        gt_index = build_ground_truth_index(rows)
+    pair_to_answer = gt_index["pair_to_answer"]
+    query_flags = gt_index["query_flags"]
+
     for result in results:
         article_to_check = result['article_to_check']
         if article_to_check in checked_articles:
             continue
         checked_articles.add(article_to_check)
+        query_key = article_key_function(article_to_check)
         articles = result['articles']
-        articles = [a for a in articles if article_key_function(article_to_check) != article_key_function(a)]
+        articles = [a for a in articles if article_key_function(a) != query_key]
 
         if len(articles) == 0:
-            matching_rows = [r for r in rows if article_key_function(r["article1"]) == article_key_function(article_to_check) or article_key_function(r["article2"]) == article_key_function(article_to_check)]
-            has_true = any(r['answer'] is True for r in matching_rows)
-            has_false = any(r['answer'] is False for r in matching_rows)
+            has_true, has_false = query_flags.get(query_key, (False, False))
             if has_true:
                 false_negative += 1
             elif has_false:
                 blind_negative += 1
         else:
             for a in articles[:top_k]:
-                matching_rows = [r for r in rows if (article_key_function(r["article1"]) == article_key_function(article_to_check) and article_key_function(r["article2"]) == article_key_function(a)) or (article_key_function(r["article2"]) == article_key_function(article_to_check) and article_key_function(r["article1"]) == article_key_function(a))]
-                if len(matching_rows) == 0:
-                    pair = (article_key_function(article_to_check), article_key_function(a))
+                article_key = article_key_function(a)
+                pkey = (query_key, article_key) if query_key <= article_key else (article_key, query_key)
+                if pkey not in pair_to_answer:
+                    pair = (query_key, article_key)
                     reverse_pair = (pair[1], pair[0])
                     if pair not in seen_pairs and reverse_pair not in seen_pairs:
                         missed_pairs.append({"article1": article_to_check, "article2": a, "answer": None})
                         seen_pairs.add(pair)
                         blind_positive += 1
-                elif matching_rows[0]['answer'] is True:
+                elif pair_to_answer[pkey] is True:
                     true_positive += 1
-                elif matching_rows[0]['answer'] is False:
+                elif pair_to_answer[pkey] is False:
                     false_positive += 1
 
     query_num = len(checked_articles)
@@ -328,6 +363,8 @@ if __name__ == "__main__":
     else:
         rows = load_ground_truth(args.ground_truth_path)
         print(f"[INFO] loaded {len(rows)} ground truth rows from {args.ground_truth_path}")
+        # Build O(1) lookup indices once and reuse across all result files
+        gt_index = build_ground_truth_index(rows)
 
         # resolve result files
         result_files = []
@@ -346,7 +383,7 @@ if __name__ == "__main__":
         all_missed = []
         all_metrics = []
         for rf in sorted(result_files):
-            res = evaluate_single(rf, rows, top_k=args.top_k, biencoder_top_k=args.biencoder_top_k)
+            res = evaluate_single(rf, rows, top_k=args.top_k, biencoder_top_k=args.biencoder_top_k, gt_index=gt_index)
             all_missed.extend(res["missed_pairs"])
             all_metrics.append({k: v for k, v in res.items() if k != "missed_pairs"})
 
