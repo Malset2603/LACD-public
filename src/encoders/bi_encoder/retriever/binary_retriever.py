@@ -178,7 +178,10 @@ def binary_retriever(
         except Exception:
             _wipe_ids = []
         if _wipe_ids:
-            chroma_collection.delete(ids=list(_wipe_ids))
+            # Chroma caps one delete at 41,666 embeddings: wipe in batches.
+            _wipe_ids = list(_wipe_ids)
+            for _s in range(0, len(_wipe_ids), 10000):
+                chroma_collection.delete(ids=_wipe_ids[_s:_s + 10000])
             tqdm.write(f"[REBUILD] wiped {len(_wipe_ids)} existing docs; rebuilding from scratch")
     all_articles = laws_df["contents"].to_list()
     n_expected = len(all_articles)
