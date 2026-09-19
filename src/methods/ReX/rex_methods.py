@@ -7,10 +7,7 @@ def rex2(query, articles, conflicts, predicts_from_reranker, k0):
     # new_results = articles[:k0]
     true_articles = [a for a in articles[:k0] if a in predicts_from_reranker.get(query, []) and a != query]
 
-    tested_articles = [article_key_function(a) for a in articles][:k0]
-    import copy
-    conflicts = copy.deepcopy(conflicts)
-    conflicts[query]=[]
+    tested_articles = [article_key_function(a) for a in articles[:k0]]
     prestige_articles = []
     # print(true_articles)
     for t in true_articles:
