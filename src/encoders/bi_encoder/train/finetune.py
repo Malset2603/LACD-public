@@ -268,10 +268,11 @@ if __name__ == "__main__":
 
     class BalancedTrainer(Trainer):
         """Trainer that uses BalancedBatchSampler for InfoNCE to ensure each batch has positives."""
-        def __init__(self, pos_indices, neg_indices, *args, **kwargs):
+        def __init__(self, pos_indices, neg_indices, sampler_seed=42, *args, **kwargs):
             super().__init__(*args, **kwargs)
             self.pos_indices = pos_indices
             self.neg_indices = neg_indices
+            self.sampler_seed = sampler_seed
 
         def get_train_dataloader(self):
             if self.train_dataset is None:
@@ -279,7 +280,7 @@ if __name__ == "__main__":
             batch_size = self.args.per_device_train_batch_size
             # Create balanced batch sampler with 25% positives
             batch_sampler = BalancedBatchSampler(
-                self.pos_indices, self.neg_indices, batch_size, seed=SEED
+                self.pos_indices, self.neg_indices, batch_size, seed=self.sampler_seed
             )
             return DataLoader(
                 self.train_dataset,
@@ -386,6 +387,7 @@ if __name__ == "__main__":
                   f"-> {max(1, args.batch_size//4)}/{args.batch_size} per batch (25%)")
             trainer = BalancedTrainer(
                 pos_indices, neg_indices,
+                sampler_seed=args.seed,
                 model=model,
                 args=training_args,
                 train_dataset=train_dataset,
