@@ -172,7 +172,8 @@ def binary_retriever(
     # partial DB (the old count()==0 guard did the latter).
     if force_rebuild:
         try:
-            _wipe_ids = chroma_collection.get()["ids"]
+            # include=[]: ids only, skip deserializing full documents.
+            _wipe_ids = chroma_collection.get(include=[])["ids"]
         except Exception:
             _wipe_ids = []
         if _wipe_ids:
@@ -186,11 +187,19 @@ def binary_retriever(
     except Exception:
         n_present = 0
     if n_present > 0:
-        try:
-            existing_ids = set(chroma_collection.get()["ids"])
-        except Exception:
-            existing_ids = set()
-    missing = [i for i in range(n_expected) if str(i) not in existing_ids]
+        # Short-circuit: same count as the deterministic positional selection
+        # means complete (same seed+corpus => same id set); suspect content is
+        # --force_rebuild's job, not resume's. Otherwise fetch ids only.
+        if n_present == n_expected:
+            missing = []
+        else:
+            try:
+                existing_ids = set(chroma_collection.get(include=[])["ids"])
+            except Exception:
+                existing_ids = set()
+            missing = [i for i in range(n_expected) if str(i) not in existing_ids]
+    else:
+        missing = list(range(n_expected))
     if n_expected > 0 and not missing and n_present > n_expected:
         tqdm.write(f"[CHROMA] collection holds {n_present} docs for {n_expected} corpus rows; reusing as-is")
     if n_expected > 0 and missing:
