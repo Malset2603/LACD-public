@@ -1,17 +1,24 @@
+import re
+from functools import lru_cache
+
 SEED = 42
 LACD_DATASET_PATH="./data/datasets/LACD-biclassification/train-test-divide-refine/"
 # LACD_DATASET_PATH="./data/datasets/LACD-biclassification/train-test-divide-filter7/"
 
+# Precompiled once: article_key_function is called millions of times per run.
+_KEY_PATTERN = re.compile(r'제[\d]+조(?:의[\d]+)?')
+
+# Bounded memoization (not unbounded): ~79k corpus + queries fit for ~100% hits
+# after warmup, while LRU eviction guards against unbounded generated texts.
+@lru_cache(maxsize=100000)
 def article_key_function(text)->str:
-    import re
-    
     # Regular expression to match "제O조(의O)"
     try:
         text = text.replace("·", "ㆍ")
     except:
         print("text is:", text)
         exit(0)
-    match = re.search(r'제[\d]+조(?:의[\d]+)?', text)
+    match = _KEY_PATTERN.search(text)
     if match:
         return text[:match.end()]
     else:
