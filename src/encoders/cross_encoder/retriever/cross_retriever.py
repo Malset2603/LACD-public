@@ -23,32 +23,51 @@ def cross_retriever(query, top_k_articles, cross_encoder_model, tokenizer, artic
     List of (article, score) where score represents the classification score of contradiction.
     """
     # Load tokenizer and cross-encoder model
-    # FIX: avoid mutating the global ArticleNetwork shared across retrieval steps.
-    # The model vector_tensor has size N (number of corpus laws). Calling add_article_node
-    # mutates the network to N+k -> index OOB in GNN (x[article_idx]).
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    cross_encoder_model.to(device)
+
+    # FIX: Single reserved query slot (N0 + 1) to eliminate O(N) reallocation
+    # and copying across hundreds of evaluation queries.
+    if not hasattr(cross_encoder_model, "_base_node_count"):
+        cross_encoder_model._base_node_count = cross_encoder_model.vector_tensor.shape[0]
+        dummy_slot = torch.zeros(
+            (1, cross_encoder_model.vector_tensor.shape[1]),
+            device=cross_encoder_model.vector_tensor.device,
+            dtype=cross_encoder_model.vector_tensor.dtype,
+        )
+        cross_encoder_model.vector_tensor = torch.cat(
+            [cross_encoder_model.vector_tensor, dummy_slot], dim=0
+        )
+
+    base_n = cross_encoder_model._base_node_count
+
     query_key = article_key_function(query)
     is_new_query = query_key not in article_network.article_key_to_idx
     if is_new_query:
-        # temporary index = append position (valid after cat)
-        article_idx = cross_encoder_model.vector_tensor.shape[0]
+        article_idx = base_n
+        if index_method != "none":
+            # hybrid: query_vector from binary_retriever is available; fallback to zeros if None
+            if query_vector is None:
+                query_vector_tensor = torch.zeros(
+                    (cross_encoder_model.vector_tensor.shape[1],),
+                    device=cross_encoder_model.vector_tensor.device,
+                    dtype=cross_encoder_model.vector_tensor.dtype,
+                )
+            else:
+                if isinstance(query_vector, np.ndarray):
+                    query_vector_tensor = torch.from_numpy(query_vector).to(
+                        device=cross_encoder_model.vector_tensor.device,
+                        dtype=cross_encoder_model.vector_tensor.dtype,
+                    )
+                else:
+                    query_vector_tensor = query_vector.to(
+                        device=cross_encoder_model.vector_tensor.device,
+                        dtype=cross_encoder_model.vector_tensor.dtype,
+                    )
+            with torch.no_grad():
+                cross_encoder_model.vector_tensor[base_n].copy_(query_vector_tensor.flatten())
     else:
         article_idx = article_network.article_key_to_idx[query_key]
-
-    if index_method != "none" and is_new_query:
-        # hybrid: query_vector from binary_retriever is available; fallback to zeros if None
-        if query_vector is None:
-            query_vector_tensor = torch.zeros((1, cross_encoder_model.vector_tensor.shape[1]), device=cross_encoder_model.vector_tensor.device)
-        else:
-            if isinstance(query_vector, np.ndarray):
-                query_vector_tensor = torch.tensor(query_vector).to(cross_encoder_model.vector_tensor.device)
-            else:
-                query_vector_tensor = query_vector.to(cross_encoder_model.vector_tensor.device)  # type: ignore
-            if query_vector_tensor.dim() == 1: # type: ignore
-                query_vector_tensor = query_vector_tensor.unsqueeze(0)  # type: ignore
-        cross_encoder_model.vector_tensor = torch.cat([cross_encoder_model.vector_tensor, query_vector_tensor], dim=0) # type: ignore
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    cross_encoder_model.to(device)
     # fp16 autocast scope (CUDA only; no-op otherwise, never mutates the model)
     use_cuda = torch.cuda.is_available()
     autocast_ctx = torch.autocast(device_type="cuda" if use_cuda else "cpu", dtype=torch.float16, enabled=bool(fp16) and use_cuda)
@@ -149,27 +168,50 @@ def noLM_cross_retriever(article, top_k_articles, model_path, article_network:Ar
     cross_encoder_model = torch.load(model_path + "/model.pth", weights_only=False)
     cross_encoder_model.eval()
 
-    # FIX: same as cross_retriever - avoid mutating global state, cat only for new node
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    cross_encoder_model.to(device)
+
+    # FIX: Single reserved query slot (N0 + 1) to eliminate O(N) reallocation
+    # and copying across hundreds of evaluation queries.
+    if not hasattr(cross_encoder_model, "_base_node_count"):
+        cross_encoder_model._base_node_count = cross_encoder_model.vector_tensor.shape[0]
+        dummy_slot = torch.zeros(
+            (1, cross_encoder_model.vector_tensor.shape[1]),
+            device=cross_encoder_model.vector_tensor.device,
+            dtype=cross_encoder_model.vector_tensor.dtype,
+        )
+        cross_encoder_model.vector_tensor = torch.cat(
+            [cross_encoder_model.vector_tensor, dummy_slot], dim=0
+        )
+
+    base_n = cross_encoder_model._base_node_count
+
     query_key = article_key_function(article)
     is_new_query = query_key not in article_network.article_key_to_idx
     if is_new_query:
-        article_idx = cross_encoder_model.vector_tensor.shape[0]
+        article_idx = base_n
         if index_method != "none":
             if article_vector is None:
-                article_vector_tensor = torch.zeros((1, cross_encoder_model.vector_tensor.shape[1]), device=cross_encoder_model.vector_tensor.device)
+                article_vector_tensor = torch.zeros(
+                    (cross_encoder_model.vector_tensor.shape[1],),
+                    device=cross_encoder_model.vector_tensor.device,
+                    dtype=cross_encoder_model.vector_tensor.dtype,
+                )
             else:
                 if isinstance(article_vector, np.ndarray):
-                    article_vector_tensor = torch.tensor(article_vector).to(cross_encoder_model.vector_tensor.device)
+                    article_vector_tensor = torch.from_numpy(article_vector).to(
+                        device=cross_encoder_model.vector_tensor.device,
+                        dtype=cross_encoder_model.vector_tensor.dtype,
+                    )
                 else:
-                    article_vector_tensor = article_vector.to(cross_encoder_model.vector_tensor.device)  # type: ignore
-                if article_vector_tensor.dim() == 1: # type: ignore
-                    article_vector_tensor = article_vector_tensor.unsqueeze(0)  # type: ignore
-            cross_encoder_model.vector_tensor = torch.cat([cross_encoder_model.vector_tensor, article_vector_tensor], dim=0) # type: ignore
+                    article_vector_tensor = article_vector.to(
+                        device=cross_encoder_model.vector_tensor.device,
+                        dtype=cross_encoder_model.vector_tensor.dtype,
+                    )
+            with torch.no_grad():
+                cross_encoder_model.vector_tensor[base_n].copy_(article_vector_tensor.flatten())
     else:
         article_idx = article_network.article_key_to_idx[query_key]
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    cross_encoder_model.to(device)
 
     retrieval_start_time = time.time()
 
