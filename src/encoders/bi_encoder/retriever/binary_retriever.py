@@ -274,7 +274,9 @@ def binary_retriever(
             # stage buffers so RAM stays flat regardless of corpus size.
             if len(gpu_buf) >= chunk_size or ptr >= len(order):
                 _t4 = time.perf_counter()
-                block = torch.stack(gpu_buf).cpu().numpy()
+                # cat (not stack): buffered batches vary in size (tail partial
+                # batch, OOM step-down), so equal-size stacking is wrong here.
+                block = torch.cat(gpu_buf).cpu().numpy()
                 t_d2h += time.perf_counter() - _t4
                 n_d2h += 1
                 del gpu_buf[:]
