@@ -312,9 +312,9 @@ if __name__ == "__main__":
         edge_index_tensor = article_network.create_edge_index()
         edge_index_tensor = edge_index_tensor.to(device)
         if args.subset_laws is not None:
-            print(f"[SUBSET] ArticleNetwork nodes {len(article_network.all_article_keys)} subset_laws={args.subset_laws} edges {edge_index_tensor.shape[1]//2}")
+            print(f"[GRAPH] ArticleNetwork nodes {len(article_network.all_article_keys)} subset_laws={args.subset_laws} edges {edge_index_tensor.shape[1]//2}")
     elif args.subset_laws is not None:
-        print(f"[SUBSET] ArticleNetwork nodes {len(article_network.all_article_keys)} subset_laws={args.subset_laws} (nodes only, no edge tensor)")
+        print(f"[GRAPH] ArticleNetwork nodes {len(article_network.all_article_keys)} subset_laws={args.subset_laws} (nodes only, no edge tensor)")
 
 
     reranker = None
@@ -365,7 +365,7 @@ if __name__ == "__main__":
             orig_len = len(queries)
             sample_size = max(1, int(orig_len * args.subset_ratio))
             queries = rng.sample(queries, sample_size)
-            print(f"[SUBSET] queries sampled {orig_len} -> {len(queries)} (ratio={args.subset_ratio}, seed={args.subset_seed})")
+            print(f"[SAMPLE] queries sampled {orig_len} -> {len(queries)} (ratio={args.subset_ratio}, seed={args.subset_seed})")
 
         if args.debug:
             print(f"[DEBUG] limiting test-benchmark queries to {args.debug_limit} samples")

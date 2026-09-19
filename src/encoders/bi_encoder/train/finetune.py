@@ -119,8 +119,8 @@ if __name__ == "__main__":
         # Polars: height and sum
         train_pos = train_df.filter(pl.col("answer") == True).height
         val_pos = val_df.filter(pl.col("answer") == True).height
-        print(f"[SUBSET] early-load ratio={args.subset_ratio} seed={args.subset_seed} -> train {orig_train}->{train_df.height} val {orig_val}->{val_df.height} test {orig_test}->{test_df.height} (stratified)")
-        print(f"[SUBSET] train pos {train_pos}/{train_df.height} ({train_pos/train_df.height:.1%} if train_df.height else 0), val {val_pos}/{val_df.height} ({val_pos/val_df.height:.1%} if val_df.height else 0)")
+        print(f"[SAMPLE] early-load ratio={args.subset_ratio} seed={args.subset_seed} -> train {orig_train}->{train_df.height} val {orig_val}->{val_df.height} test {orig_test}->{test_df.height} (stratified)")
+        print(f"[SAMPLE] train pos {train_pos}/{train_df.height} ({train_pos/train_df.height:.1%} if train_df.height else 0), val {val_pos}/{val_df.height} ({val_pos/val_df.height:.1%} if val_df.height else 0)")
     else:
         train_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide-refine/train.jsonl')
         test_df = pl.read_ndjson('./data/datasets/LACD-biclassification/train-test-divide-refine/test.jsonl')

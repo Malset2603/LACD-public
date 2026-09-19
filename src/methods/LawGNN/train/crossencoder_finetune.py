@@ -35,7 +35,7 @@ def load_dataset(jsonl_file, article_network, tokenizer, method="baseline", case
     if subset_ratio is not None and subset_ratio < 1.0:
         from src.utils.utils import load_jsonl_early
         all_lines, orig = load_jsonl_early(jsonl_file, ratio=subset_ratio, seed=subset_seed, label_key="answer")
-        print(f"[SUBSET] early-load {jsonl_file} {orig}->{len(all_lines)} ratio={subset_ratio} pos {sum(1 for r in all_lines if r.get('answer'))}/{len(all_lines)}")
+        print(f"[SAMPLE] early-load {jsonl_file} {orig}->{len(all_lines)} ratio={subset_ratio} pos {sum(1 for r in all_lines if r.get('answer'))}/{len(all_lines)}")
     else:
         all_lines = []
         with open(jsonl_file, 'r', encoding='utf-8') as f:
@@ -79,10 +79,10 @@ def load_dataset(jsonl_file, article_network, tokenizer, method="baseline", case
     # are dropped above, which can leave an empty (or near-empty) dataset.
     if len(dataset) == 0:
         raise ValueError(
-            f"[SUBSET] {jsonl_file}: 0/{len(all_lines)} pairs survived graph filtering "
+            f"[GRAPH] {jsonl_file}: 0/{len(all_lines)} pairs survived graph filtering "
             f"({key_error_cnt} dropped as out-of-subset). Increase --subset_laws or drop --subset_ratio."
         )
-    print(f"[SUBSET] {jsonl_file}: kept {len(dataset)}/{len(all_lines)} pairs ({key_error_cnt} out-of-subset dropped)")
+    print(f"[GRAPH] {jsonl_file}: kept {len(dataset)}/{len(all_lines)} pairs ({key_error_cnt} out-of-subset dropped)")
     return dataset
 
 # Example execution
@@ -153,15 +153,15 @@ if __name__ == "__main__":
     edge_index_tensor = article_network.create_edge_index()
     edge_index_tensor = edge_index_tensor.to(device)
     if args.subset_laws is not None:
-        print(f"[SUBSET] ArticleNetwork nodes {len(article_network.all_article_keys)} (subset_laws={args.subset_laws}) edges {edge_index_tensor.shape[1]//2} (bidirectional)")
+        print(f"[GRAPH] ArticleNetwork nodes {len(article_network.all_article_keys)} (subset_laws={args.subset_laws}) edges {edge_index_tensor.shape[1]//2} (bidirectional)")
 
     # propagate max_length/fp16 to utils if provided
     if args.max_length != 4096:
         from src.utils.encoder import utils as _enc_utils
         _enc_utils.MAX_TOKEN_LENGTH = args.max_length
-        print(f"[SUBSET] MAX_TOKEN_LENGTH overridden -> {args.max_length}")
+        print(f"[CONFIG] MAX_TOKEN_LENGTH overridden -> {args.max_length}")
     if args.gradient_checkpointing:
-        print(f"[SUBSET] gradient_checkpointing requested (GNN LM part only if supported)")
+        print(f"[CONFIG] gradient_checkpointing requested (GNN LM part only if supported)")
 
     # Load all contents from Chroma DB
     all_contents = chroma_collection.get(include=["embeddings", "documents"]) # type: ignore

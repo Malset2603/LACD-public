@@ -155,8 +155,10 @@ def binary_retriever(
             _FILTERED_DF_CACHE[cache_key] = filtered_df
             laws_df = filtered_df
             if not _SUBSET_FILTER_LOGGED:
-                tqdm.write(f"[SUBSET] Chroma filter {before}->{laws_df.height} rows by allowed_keys ({len(allowed_keys)} keep)")
                 _SUBSET_FILTER_LOGGED = True
+                # Stay silent when nothing was filtered (full-corpus runs).
+                if laws_df.height != before:
+                    tqdm.write(f"[GRAPH] Chroma filter {before}->{laws_df.height} rows by allowed_keys ({len(allowed_keys)} keep)")
 
     # 4. Resolve chroma_collection
     if isinstance(chroma_collection, str):

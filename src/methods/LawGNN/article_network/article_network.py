@@ -59,7 +59,7 @@ class ArticleNetwork:
                         deg[_d['target_key']] += 1
             except Exception as e:
                 deg = None
-                print(f"[MINI] degree early-load failed {e}, fallback random")
+                print(f"[GRAPH] degree early-load failed {e}, fallback random")
 
         # 2) stream laws.csv
         if self.subset_laws is not None and deg is not None:
@@ -80,7 +80,7 @@ class ArticleNetwork:
                 rnd.shuffle(remaining)
                 keep = set(hubs + remaining[: self.subset_laws - n_hub])
                 self.all_article_keys = [k for k in all_keys_tmp if k in keep]
-                print(f"[SUBSET] laws early-load sampled -> {len(self.all_article_keys)} (hubs {n_hub} + random {self.subset_laws - n_hub}) seed={self.subset_seed} target {self.subset_laws} total {total}")
+                print(f"[GRAPH] laws early-load sampled -> {len(self.all_article_keys)} (hubs {n_hub} + random {self.subset_laws - n_hub}) seed={self.subset_seed} target {self.subset_laws} total {total}")
             else:
                 self.all_article_keys = all_keys_tmp
         elif self.subset_laws is not None:
@@ -94,7 +94,7 @@ class ArticleNetwork:
             rnd = _random.Random(self.subset_seed)
             rnd.shuffle(all_keys_tmp)
             self.all_article_keys = all_keys_tmp[: self.subset_laws]
-            print(f"[SUBSET] laws random early-load -> {len(self.all_article_keys)} target {self.subset_laws}")
+            print(f"[GRAPH] laws random early-load -> {len(self.all_article_keys)} target {self.subset_laws}")
         else:
             # full mode: streaming without sampling
             with open(laws_path, encoding='utf-8', errors='ignore') as _f:
