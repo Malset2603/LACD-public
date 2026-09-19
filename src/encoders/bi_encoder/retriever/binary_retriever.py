@@ -216,6 +216,9 @@ def binary_retriever(
         gpu_buf = []
         pending_docs = []
         pending_ids = []
+        # Row counter (not len(gpu_buf): each entry is a variable-size batch,
+        # so buffer length counts batches while the chunk budget is documents).
+        pending_rows = 0
         # Stage 0 instrumentation: per-stage encode timings (decides whether
         # background tokenization threads are worth building later).
         t_tok = t_h2d = t_fwd = t_d2h = t_add = 0.0
@@ -271,10 +274,11 @@ def binary_retriever(
             gpu_buf.append(pooled_gpu)
             pending_docs.extend(batch_articles)
             pending_ids.extend(str(i) for i in batch_idx)
+            pending_rows += len(batch_idx)
             ptr += len(batch_idx)
             # Flush (D2H + chroma add) per chunk or at the tail, then free all
             # stage buffers so RAM stays flat regardless of corpus size.
-            if len(gpu_buf) >= chunk_size or ptr >= len(order):
+            if pending_rows >= chunk_size or ptr >= len(order):
                 _t4 = time.perf_counter()
                 # cat (not stack): buffered batches vary in size (tail partial
                 # batch, OOM step-down), so equal-size stacking is wrong here.
@@ -292,6 +296,7 @@ def binary_retriever(
                 n_add += 1
                 del pending_docs[:]
                 del pending_ids[:]
+                pending_rows = 0
             pbar.update(len(batch_idx))
         pbar.close()
         t_sum = max(t_tok + t_h2d + t_fwd + t_d2h + t_add, 1e-9)
