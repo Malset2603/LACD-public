@@ -3,6 +3,29 @@ import numpy as np
 from rank_bm25 import BM25Okapi
 from src.utils.encoder.biencoder_utils import load_chromaDB_byname
 
+# Module-level caches keyed by chroma_db_name. The law corpus is static within
+# a run, so the collection handle, document list, and fitted TF-IDF/BM25 index
+# are built once; per-query work is only transform/score. Keying by db name
+# prevents cross-contamination between experiments sharing one process.
+_COLLECTION_CACHE = {}
+_DOCS_CACHE = {}
+_TFIDF_CACHE = {}
+_BM25_CACHE = {}
+
+
+def _get_collection(chroma_db_name):
+    if chroma_db_name not in _COLLECTION_CACHE:
+        _COLLECTION_CACHE[chroma_db_name] = load_chromaDB_byname(chroma_db_name)
+    return _COLLECTION_CACHE[chroma_db_name]
+
+
+def _get_law_documents(chroma_db_name):
+    # Fetch once; embeddings are never used by classical retrievers.
+    if chroma_db_name not in _DOCS_CACHE:
+        collection = _get_collection(chroma_db_name)
+        _DOCS_CACHE[chroma_db_name] = collection.get(include=["documents"])["documents"]
+    return _DOCS_CACHE[chroma_db_name]
+
 def find_top_conflicts_with_tfidf(article, chroma_db_name, top_k=10):
     """
     Function to find top conflicts using TF-IDF retriever.
@@ -16,21 +39,24 @@ def find_top_conflicts_with_tfidf(article, chroma_db_name, top_k=10):
 
     Returns:
     List of top-k articles that contradict the input article.
+
+    NOTE: the TF-IDF index is fit on the law corpus only (standard practice);
+    the query is transformed, not fit. The old code fit on corpus + query,
+    which leaked the query into IDF values. Rankings are effectively the
+    same; verify parity on retrieval metrics before paper runs.
     """
 
-    chroma_collection = load_chromaDB_byname(chroma_db_name)
+    law_documents = _get_law_documents(chroma_db_name)
 
-    # Retrieve encoded laws from Chroma DB
-    encoded_laws = chroma_collection.get(include=["embeddings", "documents"])
-    law_documents = encoded_laws["documents"]
+    # Fit once per DB; per query only transform.
+    if chroma_db_name not in _TFIDF_CACHE:
+        tfidf_vectorizer = TfidfVectorizer()
+        law_vectors = tfidf_vectorizer.fit_transform(law_documents)
+        _TFIDF_CACHE[chroma_db_name] = (tfidf_vectorizer, law_vectors)
+    else:
+        tfidf_vectorizer, law_vectors = _TFIDF_CACHE[chroma_db_name]
 
-    # TF-IDF Vectorization
-    corpus = law_documents + [article]
-    tfidf_vectorizer = TfidfVectorizer()
-    tfidf_matrix = tfidf_vectorizer.fit_transform(corpus)
-    
-    article_vector = tfidf_matrix[-1]  # Last vector corresponds to the input article
-    law_vectors = tfidf_matrix[:-1]   # All but the last are law documents
+    article_vector = tfidf_vectorizer.transform([article])
 
     similarities = np.dot(law_vectors, article_vector.T).toarray().flatten()
     top_k_indices = similarities.argsort()[::-1][:top_k]
@@ -52,20 +78,18 @@ def find_top_conflicts_with_bm25(article, chroma_db_name, top_k=10):
 
     Returns:
     List of top-k articles that contradict the input article.
+
+    The BM25 index is fit on the law corpus only (as before) and cached per
+    DB; per query only tokenizes and scores. Bit-identical to the old code.
     """
 
+    law_documents = _get_law_documents(chroma_db_name)
 
-    chroma_collection = load_chromaDB_byname(chroma_db_name)
-
-
-
-    # Retrieve encoded laws from Chroma DB
-    encoded_laws = chroma_collection.get(include=["embeddings", "documents"])
-    law_documents = encoded_laws["documents"]
-
-    # Tokenize and apply BM25
-    corpus = [doc.split() for doc in law_documents]  # Split documents into words
-    bm25 = BM25Okapi(corpus)
+    # Fit once per DB; per query only tokenize and score.
+    if chroma_db_name not in _BM25_CACHE:
+        corpus = [doc.split() for doc in law_documents]  # Split documents into words
+        _BM25_CACHE[chroma_db_name] = BM25Okapi(corpus)
+    bm25 = _BM25_CACHE[chroma_db_name]
 
     # Tokenize the input article
     article_tokens = article.split()
