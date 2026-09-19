@@ -256,7 +256,7 @@ if __name__ == "__main__":
 
     writer = SummaryWriter()
 
-    train_df = pd.read_json(dataset_path + 'train.jsonl', lines=True)
+    train_df = pl.read_ndjson(dataset_path + 'train.jsonl')
     class_weights = get_class_weights(train_df)
 
     trainer = CustomTrainer(
@@ -458,7 +458,6 @@ if __name__ == "__main__":
         from torch.utils.data import DataLoader
         import numpy as np
         import matplotlib.pyplot as plt
-        import pandas as pd
 
         # Create ./visualization/ directory if it doesn't exist
         os.makedirs("./visualization/", exist_ok=True)

@@ -17,7 +17,13 @@ from torch.nn import BCEWithLogitsLoss
 
 # 클래스별 answer 값의 분포 확인 및 가중치 계산
 def get_class_weights(train_df):
-    answer_counts = train_df["answer"].value_counts().sort_index().to_numpy()
+    # Backward compatible: pandas Series.value_counts().sort_index() vs
+    # polars DataFrame(answer, count). Both yield counts ordered [False, True].
+    vc = train_df["answer"].value_counts()
+    if hasattr(vc, "sort_index"):
+        answer_counts = vc.sort_index().to_numpy()  # pandas
+    else:
+        answer_counts = vc.sort("answer").to_numpy()[:, 1]  # polars
 
     class_weights = 1.0 / answer_counts  # 반비례 가중치 계산
     class_weights = class_weights / class_weights.sum()  # 정규화
