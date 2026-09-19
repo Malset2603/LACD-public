@@ -57,6 +57,10 @@ if __name__ == "__main__":
     # batch size exposed (default 4 = original repo, backward compatible)
     parser.add_argument("--batch_size", type=int, default=4, help="per_device train/eval batch size (original: 4)")
 
+    # dataloader parallelism: tokenization runs per-sample in __getitem__, so
+    # background workers prevent GPU starvation (0 = original single-process)
+    parser.add_argument("--dataloader_workers", type=int, default=2, help="dataloader worker processes for background tokenization (default 2, use 0 for original single-process behavior)")
+
     # opsi 2 & 3: max_length & fp16 (default = original, backward compatible)
     parser.add_argument("--max_length", type=int, default=4096, help="max token length (original: 4096, use 512 for debug on 2GB GPU)")
     parser.add_argument("--fp16", action="store_true", help="enable fp16 training (original: false)")
@@ -344,6 +348,8 @@ if __name__ == "__main__":
         report_to="tensorboard",
         fp16=args.fp16,
         gradient_checkpointing=args.gradient_checkpointing,
+        dataloader_num_workers=max(0, args.dataloader_workers),
+        dataloader_persistent_workers=max(0, args.dataloader_workers) > 0,
     )
 
     
