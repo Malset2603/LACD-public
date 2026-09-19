@@ -201,8 +201,10 @@ if __name__ == "__main__":
     parser.add_argument("--chroma_db_name", type=str, help="Name of the Chroma DB where encodings will be stored", default="kbb-baseline-nofinetune")
     parser.add_argument("--biencoder_top_k", type=int, default=100, help="binary_encoder_top_k")
 
-    # retrieval method
-    parser.add_argument("--retrieval_method", type=str, choices=["retrieval", "re2", "tfidf", "bm25"], help="retrieval method. retrieval, re2, tfidf, or bm25", default="retrieval")
+    # retrieval method (bi-only is a legacy alias of retrieval from generate_chroma_db.sh)
+    parser.add_argument("--retrieval_method", type=str, choices=["retrieval", "bi-only", "re2", "tfidf", "bm25"], help="retrieval method. retrieval (pure bi-encoder; bi-only is a legacy alias), re2, tfidf, or bm25", default="retrieval")
+    # informational only: encoder behavior comes from the loaded checkpoint, not this flag
+    parser.add_argument("--biencoder_method", type=str, default="baseline", help="legacy tag from generate_chroma_db.sh (baseline/caseaug/ruleaug); informational only, the checkpoint determines behavior")
     parser.add_argument("--crossencoder_index_method", type=str, choices=["none", "vanilla", "gcn", "graphsage", "gat"], help="index usage for cross encoder. none means do not use index. vanilla means use index w/o GNNs.", default="none")
     parser.add_argument("--gnn_edge_way", type=str, choices=["both", "forward", "backward"], help="The way for edges in CAMGraph", default="both")
 
@@ -240,6 +242,10 @@ if __name__ == "__main__":
     args.mini_ratio = args.subset_ratio
     args.mini_laws = args.subset_laws
     args.mini_seed = args.subset_seed
+    # legacy alias: bi-only == pure bi-encoder retrieval; normalize early so all
+    # branches, needs_nodes/needs_graph, and output naming see "retrieval"
+    if args.retrieval_method == "bi-only":
+        args.retrieval_method = "retrieval"
 
     # 사용 예시
     biencoder_model_path = args.biencoder_model_path
