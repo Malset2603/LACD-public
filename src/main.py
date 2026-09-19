@@ -294,11 +294,17 @@ if __name__ == "__main__":
 
     # from src.utils.utils import article_key_function
 
-    article_network = ArticleNetwork(edge_way=args.gnn_edge_way, subset_laws=args.subset_laws, subset_seed=args.subset_seed)
-    edge_index_tensor = article_network.create_edge_index()
-    edge_index_tensor = edge_index_tensor.to(device)
-    if args.subset_laws is not None:
-        print(f"[SUBSET] ArticleNetwork nodes {len(article_network.all_article_keys)} subset_laws={args.subset_laws} edges {edge_index_tensor.shape[1]//2}")
+    # GNN graph is only needed by the re2 path (cross_retriever); retrieval/
+    # tfidf/bm25 modes never touch article_network, so skip the expensive
+    # law_link parsing + edge tensor H2D transfer for build-only runs.
+    article_network = None
+    edge_index_tensor = None
+    if args.retrieval_method == "re2":
+        article_network = ArticleNetwork(edge_way=args.gnn_edge_way, subset_laws=args.subset_laws, subset_seed=args.subset_seed)
+        edge_index_tensor = article_network.create_edge_index()
+        edge_index_tensor = edge_index_tensor.to(device)
+        if args.subset_laws is not None:
+            print(f"[SUBSET] ArticleNetwork nodes {len(article_network.all_article_keys)} subset_laws={args.subset_laws} edges {edge_index_tensor.shape[1]//2}")
 
 
     reranker = None
