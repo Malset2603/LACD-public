@@ -62,6 +62,14 @@ if __name__ == "__main__":
     parser.add_argument("--fp16", action="store_true", help="enable fp16 training (original: false)")
     parser.add_argument("--gradient_checkpointing", action="store_true", help="enable gradient checkpointing to save VRAM")
 
+    # eval/save cadence: epoch-based by default (eval every 20 steps wasted ~10x
+    # eval-vs-train on the 2504-sample refine set); steps mode auto-scales the
+    # interval to ~2x per epoch unless --eval_steps is given explicitly
+    parser.add_argument("--eval_strategy", type=str, default="epoch", choices=["epoch", "steps"],
+                        help="eval/save cadence: 'epoch' (default, 1x per epoch) or 'steps' (uses --eval_steps or auto ~2x per epoch)")
+    parser.add_argument("--eval_steps", type=int, default=None,
+                        help="eval/save interval for --eval_strategy=steps (default: auto = max(100, steps_per_epoch // 2))")
+
     # optional metrics output (no default; if not provided, metrics are only printed)
     parser.add_argument("--metrics_output", type=str, default=None, help="optional path to save metrics JSON (e.g. ./outputs/metrics/bi-10k.json)")
 
@@ -299,6 +307,26 @@ if __name__ == "__main__":
     # test_dataset.print_label_counts()
     # val_dataset.print_label_counts()
 
+    # Resolve eval/save cadence (kept aligned: load_best_model_at_end requires
+    # eval and save to share the same strategy). Debug keeps the original
+    # frequent steps behavior for fast smoke-test feedback.
+    if args.debug:
+        eval_strategy, eval_steps, save_strategy, save_steps = "steps", 5, "steps", 5
+    elif (args.eval_strategy or "epoch") == "epoch":
+        eval_strategy, eval_steps, save_strategy, save_steps = "epoch", None, "epoch", None
+    else:
+        steps_per_epoch = max(1, -(-len(train_dataset) // max(1, args.batch_size)))
+        auto_steps = max(100, steps_per_epoch // 2)
+        eval_steps = args.eval_steps or auto_steps
+        eval_strategy, save_strategy, save_steps = "steps", eval_steps, eval_steps
+    print(f"[EVAL] strategy={eval_strategy} eval_steps={eval_steps} save_steps={save_steps}")
+
+    # NOTE: eval_steps/save_steps are only passed for steps-based strategies;
+    # passing None explicitly trips validation in some transformers versions.
+    _cadence_kwargs = {"eval_strategy": eval_strategy, "save_strategy": save_strategy}
+    if eval_strategy == "steps":
+        _cadence_kwargs.update(eval_steps=eval_steps, save_steps=save_steps)
+
     training_args = TrainingArguments(
         output_dir=f"./outputs/LACD-bi/small-fine-tune/{tag}",
         num_train_epochs=epoch,
@@ -308,10 +336,7 @@ if __name__ == "__main__":
         weight_decay=0,
         logging_dir=f"./outputs/LACD-bi/small-fine-tune/{tag}",
         logging_steps=10,
-        eval_strategy="steps",
-        eval_steps=20 if not args.debug else 5,
-        save_strategy="steps",
-        save_steps=20 if not args.debug else 5,
+        **_cadence_kwargs,
         save_total_limit=1,
         load_best_model_at_end=True,
         metric_for_best_model="eval_roc_auc",
