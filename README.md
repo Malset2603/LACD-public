@@ -165,6 +165,8 @@ python run_pipeline.py --exp grex-10k --subset_laws 10000 --dry_run
 ```
 Outputs are collected under `--output_dir` (default `./outputs/{exp}`) as `metrics-bi.json`, `metrics-cross.json`, `metrics-retrieval.json`, and aggregated `summary.json`.
 
+> **Eval throughput tuning (Steps 2 & 4):** VRAM scales with `eval_batch_size × max_length`. Inference needs no gradients, so `--eval_batch_size` defaults to 32 (decoupled from training `--batch_size`); on OOM the Chroma encoder halves the batch permanently and retries without scaling back up. Guide: 2GB VRAM → `--eval_batch_size 8 --max_length 512`; 24GB → `--eval_batch_size 64 --max_length 1024`. `--fp16_eval` enables fp16 autocast for retrieval encoding (CUDA only; verify recall parity before paper runs).
+
 ### ReX by synthetic C
 
 To evaluate ReX using synthetic C, use following codes:

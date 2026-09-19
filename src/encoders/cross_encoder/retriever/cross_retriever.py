@@ -8,7 +8,7 @@ from src.utils.utils import article_key_function
 
 import time
 
-def cross_retriever(query, top_k_articles, cross_encoder_model, tokenizer, article_network:ArticleNetwork, batch_size=64, index_method = "none", query_vector = None, max_length=None):
+def cross_retriever(query, top_k_articles, cross_encoder_model, tokenizer, article_network:ArticleNetwork, batch_size=64, index_method = "none", query_vector = None, max_length=None, fp16=False):
     """
     Function to use a cross-encoder to distinguish conflicts in top-k retrieved articles using batch processing.
 
@@ -49,6 +49,9 @@ def cross_retriever(query, top_k_articles, cross_encoder_model, tokenizer, artic
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     cross_encoder_model.to(device)
+    # fp16 autocast scope (CUDA only; no-op otherwise, never mutates the model)
+    use_cuda = torch.cuda.is_available()
+    autocast_ctx = torch.autocast(device_type="cuda" if use_cuda else "cpu", dtype=torch.float16, enabled=bool(fp16) and use_cuda)
 
     retrieval_start_time = time.time()
 
@@ -89,7 +92,7 @@ def cross_retriever(query, top_k_articles, cross_encoder_model, tokenizer, artic
 
 
         # Get model prediction for the batch
-        with torch.no_grad():
+        with torch.inference_mode(), autocast_ctx:
             if index_method != "none":
                 outputs = cross_encoder_model(article1_idx=article1_idx_tensor,article2_idx=article2_idx_tensor,
                 input_ids=input_ids, attention_mask=attention_mask)

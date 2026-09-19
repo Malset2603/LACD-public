@@ -75,8 +75,9 @@ def main():
     parser.add_argument("--bi_epoch", type=int, default=None, help="Epochs for bi-encoder only (default: --epoch)")
     parser.add_argument("--max_length", type=int, default=4096, help="Max token length (default 4096 full, use 512 for mini VRAM)")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size for training (default 4)")
-    parser.add_argument("--eval_batch_size", type=int, default=None, help="Batch size for Chroma DB build and retrieval/eval (default: same as --batch_size)")
-    parser.add_argument("--fp16", action="store_true", help="Enable fp16")
+    parser.add_argument("--eval_batch_size", type=int, default=None, help="Batch size for Chroma DB build and retrieval/eval (default: 32, decoupled from training --batch_size since inference needs no gradients)")
+    parser.add_argument("--fp16", action="store_true", help="Enable fp16 (training Steps 1 & 3, plus retrieval encoding in Steps 2 & 4 via --fp16_eval)")
+    parser.add_argument("--fp16_eval", action="store_true", help="Enable fp16 autocast for retrieval encoding in Steps 2 & 4 (CUDA only; verify recall parity first)")
     parser.add_argument("--gradient_checkpointing", action="store_true", help="Enable gradient checkpointing to save VRAM")
     parser.add_argument("--top_k", type=int, default=10, help="Top-K for retrieval and eval")
     # GReX / ReX expansion options (default: 'rex2' for full GReX method)
@@ -97,7 +98,7 @@ def main():
 
     args = parser.parse_args()
     steps = parse_steps(args.steps)
-    eval_batch_size = args.eval_batch_size if args.eval_batch_size is not None else args.batch_size
+    eval_batch_size = args.eval_batch_size if args.eval_batch_size is not None else 32
 
     # Derive consistent names
     bi_tag = args.bi_tag or f"kbb-{args.exp}"
@@ -156,6 +157,8 @@ def main():
             "--batch_size", str(eval_batch_size),
             "--max_length", str(args.max_length),
         ] + subset_args()
+        if args.fp16 or args.fp16_eval:
+            cmd.append("--fp16_eval")
         run_cmd(cmd, dry_run=args.dry_run)
 
     # Step 3: Cross-encoder + GNN
@@ -193,6 +196,8 @@ def main():
             "--max_length", str(args.max_length),
             "--biencoder_top_k", str(args.top_k),
         ] + subset_args()
+        if args.fp16 or args.fp16_eval:
+            cmd.append("--fp16_eval")
         run_cmd(cmd, dry_run=args.dry_run)
 
     # Step 5: Eval

@@ -14,7 +14,7 @@ MAX_TOKEN_LENGTH = 4096
 # MAX_TOKEN_LENGTH = 512
 
 # our original code, bi-encoder.
-def find_top_conflicts(article, model, tokenizer, chroma_collection, top_k=10, index_method = "none", max_length=None):
+def find_top_conflicts(article, model, tokenizer, chroma_collection, top_k=10, index_method = "none", max_length=None, fp16=False):
     """
     Function to find top conflicts using cosine similarity method with optional case augmentation.
     
@@ -46,7 +46,8 @@ def find_top_conflicts(article, model, tokenizer, chroma_collection, top_k=10, i
     input_ids = inputs["input_ids"].to(model.encoder.device)
     attention_mask = inputs["attention_mask"].to(model.encoder.device)
 
-    with torch.no_grad():
+    use_cuda = torch.cuda.is_available()
+    with torch.inference_mode(), torch.autocast(device_type="cuda" if use_cuda else "cpu", dtype=torch.float16, enabled=bool(fp16) and use_cuda):
         encoded_article = model.encoder(input_ids=input_ids, attention_mask=attention_mask)
         pooled_output = encoded_article.last_hidden_state[0, 0, :].cpu().numpy()
 
@@ -78,6 +79,7 @@ def binary_retriever(
     allowed_keys=None,
     article_network=None,
     max_length=None,
+    fp16=False,
     **kwargs
 ):
     """
@@ -95,6 +97,7 @@ def binary_retriever(
         article_network: Optional ArticleNetwork instance.
         max_length: Optional cap for tokenizer sequence length (None = legacy
             module cap MAX_TOKEN_LENGTH, always bounded by tokenizer.model_max_length).
+        fp16: Enable fp16 autocast for encoding (CUDA only, no-op otherwise).
 
     Returns:
         tuple (pooled_output, top_k_articles)
@@ -163,12 +166,24 @@ def binary_retriever(
             ids.append(str(idx))
 
         max_length = min(max_length or MAX_TOKEN_LENGTH, tokenizer.model_max_length) if tokenizer is not None else (max_length or MAX_TOKEN_LENGTH)
+        use_cuda = torch.cuda.is_available()
+        # fp16 autocast scope (CUDA only; no-op otherwise, never mutates the model)
+        autocast_ctx = torch.autocast(device_type="cuda" if use_cuda else "cpu", dtype=torch.float16, enabled=bool(fp16) and use_cuda)
 
         embeddings = []
         documents = []
 
-        for batch_start in tqdm(range(0, len(all_articles), batch_size)):
-            batch_articles = all_articles[batch_start:batch_start + batch_size]
+        # Adaptive batching with permanent step-down: on CUDA OOM, halve the
+        # batch size globally (never scale back up) and re-split the failed
+        # batch at the new size, so small-VRAM GPUs converge after ~1 OOM
+        # instead of paying a synchronizing exception per batch.
+        # OOM surfaces as torch.cuda.OutOfMemoryError (a RuntimeError subclass)
+        # or plain RuntimeError on some builds, hence the message filter.
+        enc_batch_size = max(1, batch_size)
+        batch_start = 0
+        pbar = tqdm(total=len(all_articles))
+        while batch_start < len(all_articles):
+            batch_articles = all_articles[batch_start:batch_start + enc_batch_size]
             batch_inputs = tokenizer(
                 batch_articles,
                 add_special_tokens=True,
@@ -180,13 +195,27 @@ def binary_retriever(
             input_ids = batch_inputs["input_ids"].to(model.encoder.device)
             attention_mask = batch_inputs["attention_mask"].to(model.encoder.device)
 
-            with torch.no_grad():
-                encoder_to_use = model.passage_encoder if hasattr(model, "passage_encoder") else model.encoder
-                encoded_articles = encoder_to_use(input_ids=input_ids, attention_mask=attention_mask)
-                pooled_outputs = encoded_articles.last_hidden_state[:, 0, :].cpu().numpy()
+            try:
+                with torch.inference_mode(), autocast_ctx:
+                    encoder_to_use = model.passage_encoder if hasattr(model, "passage_encoder") else model.encoder
+                    encoded_articles = encoder_to_use(input_ids=input_ids, attention_mask=attention_mask)
+                    pooled_outputs = encoded_articles.last_hidden_state[:, 0, :].cpu().numpy()
+            except RuntimeError as e:
+                if "out of memory" not in str(e).lower():
+                    raise
+                if enc_batch_size <= 1:
+                    raise
+                if use_cuda:
+                    torch.cuda.empty_cache()
+                enc_batch_size = max(1, enc_batch_size // 2)
+                tqdm.write(f"[OOM] permanent step-down encode batch -> {enc_batch_size}, retrying (never scaling back up)")
+                continue
 
             embeddings.extend(pooled_outputs)
             documents.extend(batch_articles)
+            pbar.update(len(batch_articles))
+            batch_start += len(batch_articles)
+        pbar.close()
 
         chunk_size = 1024
         total_chunks = len(embeddings) // chunk_size + 1
@@ -208,7 +237,7 @@ def binary_retriever(
 
     # 6. Retrieve top conflicts
     article_vector, top_conflicts = find_top_conflicts(
-        article_to_check, model, tokenizer, chroma_collection, top_k=top_k, max_length=max_length
+        article_to_check, model, tokenizer, chroma_collection, top_k=top_k, max_length=max_length, fp16=fp16
     )
 
     return article_vector, top_conflicts
