@@ -219,7 +219,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--batch_size", type=int, default=32, help="batch size for encoding and retrieval operations (default 32)")
     parser.add_argument("--max_length", type=int, default=None, help="max token length cap for retriever tokenization (default None = per-module legacy caps, always bounded by tokenizer.model_max_length)")
-    parser.add_argument("--fp16_eval", action="store_true", help="enable fp16 autocast for retrieval encoding (CUDA only, no-op otherwise)")
+    parser.add_argument("--fp16_eval", "--fp16", action="store_true", dest="fp16_eval", help="enable fp16 autocast for retrieval encoding (CUDA only, no-op otherwise)")
 
     # output location for retrieval results (avoid overwriting across experiments)
     parser.add_argument("--output_dir", type=str, default="./outputs/retrieval_results", help="directory to save retrieval results, e.g. ./outputs/my_experiment to avoid overwriting (default: ./outputs/retrieval_results)")

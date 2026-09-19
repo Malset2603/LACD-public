@@ -176,6 +176,8 @@ def main():
         ] + subset_args()
         if args.fp16:
             cmd.append("--fp16")
+        if args.gradient_checkpointing:
+            cmd.append("--gradient_checkpointing")
         run_cmd(cmd, dry_run=args.dry_run)
 
     # Step 4: Benchmark GReX retrieval (Rerank-then-Expand)

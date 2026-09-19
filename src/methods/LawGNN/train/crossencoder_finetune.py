@@ -247,6 +247,8 @@ if __name__ == "__main__":
         save_steps=1,                               # save interval matching eval steps
         save_total_limit=1,                          # only keep the best model
         report_to="tensorboard",                      # report to TensorBoard
+        fp16=args.fp16,
+        gradient_checkpointing=args.gradient_checkpointing,
 
         # load_best_model_at_end=True,                 # load the best model at the end
         # metric_for_best_model="eval_loss",           # metric to use for model selection
