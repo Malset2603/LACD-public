@@ -134,6 +134,12 @@ if __name__ == "__main__":
         args.epoch = 1
         epoch = 1
 
+    # No-finetune path trains nothing: fp16 would only demand CUDA for zero
+    # benefit (Trainer rejects fp16 on CPU), so force it off here.
+    if epoch == 0 and args.fp16:
+        print("[INFO] epoch=0 (nofinetune): disabling fp16, eval runs in fp32")
+        args.fp16 = False
+
     # Add 'case_idx' and 'rule_idx' columns to DataFrames
     train_df = train_df.with_columns(pl.lit(0).alias("case_idx"))
     test_df = test_df.with_columns(pl.lit(0).alias("case_idx"))
