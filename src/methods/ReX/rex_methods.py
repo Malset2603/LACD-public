@@ -52,14 +52,15 @@ def rocchio_binary_retriever(model, laws_df, chroma_collection, article_to_check
         article_to_check,
         add_special_tokens=True,
         max_length=MAX_TOKEN_LENGTH,
-        padding="max_length",
+        padding="longest",
+        pad_to_multiple_of=64,
         truncation=True,
         return_tensors="pt",
     )
     input_ids = inputs["input_ids"].to(model.encoder.device)
     attention_mask = inputs["attention_mask"].to(model.encoder.device)
 
-    with torch.no_grad():
+    with torch.inference_mode():
         encoded_article = model.encoder(input_ids=input_ids, attention_mask=attention_mask)
         pooled_output = encoded_article.last_hidden_state[0, 0, :].cpu().numpy()
 

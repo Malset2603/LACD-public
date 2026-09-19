@@ -92,7 +92,8 @@ def cross_retriever(query, top_k_articles, cross_encoder_model, tokenizer, artic
             add_special_tokens=True,
             max_length=max_length,
             truncation=True,
-            padding="max_length",
+            padding="longest",
+            pad_to_multiple_of=64,
             return_tensors="pt"
         )
 
