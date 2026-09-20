@@ -242,9 +242,9 @@ def binary_retriever(
         enc_batch_size = max(1, batch_size)
         # D2H transfers and chroma adds are batched per chunk (not per encode
         # batch) to cut device synchronizations and SQLite commits; GPU/CPU
-        # residency stays bounded (~12MB + one chunk of rows) because buffers
-        # flush every add. Chunk 4096 => ~1min rework on resume, 19 adds full.
-        chunk_size = 4096
+        # residency stays bounded (~48MB VRAM + ~500MB transient RAM) because
+        # buffers flush every add. Chunk 16384 => ~4min rework on resume, ~5 adds full.
+        chunk_size = 16384
         gpu_buf = []
         pending_docs = []
         pending_ids = []
