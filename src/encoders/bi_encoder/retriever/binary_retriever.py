@@ -167,7 +167,7 @@ def binary_retriever(
         chroma_collection = load_chromaDB_byname(chroma_collection)
 
     # 5. Populate Chroma DB (streaming + crash-resume).
-    # Each encoded 1024-chunk is added immediately so a crash no longer discards
+    # Each encoded chunk is added immediately so a crash no longer discards
     # prior GPU work. Ids are positional (str(idx)), so a restart encodes only
     # ids missing from the collection instead of silently proceeding with a
     # partial DB (the old count()==0 guard did the latter).
@@ -223,9 +223,10 @@ def binary_retriever(
         # or plain RuntimeError on some builds, hence the message filter.
         enc_batch_size = max(1, batch_size)
         # D2H transfers and chroma adds are batched per chunk (not per encode
-        # batch) to cut device synchronizations ~32x; GPU/CPU residency stays
-        # bounded (~3MB + one chunk of rows) because buffers flush every add.
-        chunk_size = 1024
+        # batch) to cut device synchronizations and SQLite commits; GPU/CPU
+        # residency stays bounded (~12MB + one chunk of rows) because buffers
+        # flush every add. Chunk 4096 => ~1min rework on resume, 19 adds full.
+        chunk_size = 4096
         gpu_buf = []
         pending_docs = []
         pending_ids = []
@@ -271,8 +272,11 @@ def binary_retriever(
             _t1 = time.perf_counter()
             if _use_ev:
                 _ev["h0"].record()
-            input_ids = batch_inputs["input_ids"].to(model.encoder.device)
-            attention_mask = batch_inputs["attention_mask"].to(model.encoder.device)
+            # B1: pinned staging removes the driver-side staging copy; with
+            # pinned memory the non_blocking launch is genuinely async (the
+            # consuming forward still syncs as needed, so semantics unchanged).
+            input_ids = batch_inputs["input_ids"].pin_memory().to(model.encoder.device, non_blocking=True)
+            attention_mask = batch_inputs["attention_mask"].pin_memory().to(model.encoder.device, non_blocking=True)
             if _use_ev:
                 _ev["h1"].record()
                 torch.cuda.synchronize()
