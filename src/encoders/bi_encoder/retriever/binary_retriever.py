@@ -13,6 +13,11 @@ import time
 MAX_TOKEN_LENGTH = 4096
 # MAX_TOKEN_LENGTH = 512
 
+# Populate-verified collections: (id(collection), n_expected) proven complete
+# earlier in this process. force_rebuild wipe drops the entry; a different DB
+# object or corpus size never hits it. Skips per-query to_list() + count().
+_POPULATED_CACHE = {}
+
 # our original code, bi-encoder.
 def find_top_conflicts(article, model, tokenizer, chroma_collection, top_k=10, index_method = "none", max_length=None, fp16=False):
     """
@@ -188,6 +193,7 @@ def binary_retriever(
     # ids missing from the collection instead of silently proceeding with a
     # partial DB (the old count()==0 guard did the latter).
     if force_rebuild:
+        _POPULATED_CACHE.pop((id(chroma_collection), laws_df.height), None)
         try:
             # include=[]: ids only, skip deserializing full documents.
             _wipe_ids = _get_all_ids(chroma_collection)
@@ -199,29 +205,38 @@ def binary_retriever(
             for _s in range(0, len(_wipe_ids), 10000):
                 chroma_collection.delete(ids=_wipe_ids[_s:_s + 10000])
             tqdm.write(f"[REBUILD] wiped {len(_wipe_ids)} existing docs; rebuilding from scratch")
-    all_articles = laws_df["contents"].to_list()
-    n_expected = len(all_articles)
-    existing_ids = set()
-    try:
-        n_present = chroma_collection.count()
-    except Exception:
-        n_present = 0
-    if n_present > 0:
-        # Short-circuit: same count as the deterministic positional selection
-        # means complete (same seed+corpus => same id set); suspect content is
-        # --force_rebuild's job, not resume's. Otherwise fetch ids only.
-        if n_present == n_expected:
-            missing = []
-        else:
-            try:
-                existing_ids = set(_get_all_ids(chroma_collection))
-                if len(existing_ids) != n_present:
-                    tqdm.write(f"[WARN] id listing incomplete ({len(existing_ids)}/{n_present}); some present docs may re-encode")
-            except Exception:
-                existing_ids = set()
-            missing = [i for i in range(n_expected) if str(i) not in existing_ids]
+    n_expected = laws_df.height
+    _pop_key = (id(chroma_collection), n_expected)
+    if (not force_rebuild) and _POPULATED_CACHE.get(_pop_key, False):
+        # Proven complete earlier in this process: skip to_list + count + build.
+        missing, n_present, all_articles = [], n_expected, []
+        _just_built = False
     else:
-        missing = list(range(n_expected))
+        all_articles = laws_df["contents"].to_list()
+        existing_ids = set()
+        try:
+            n_present = chroma_collection.count()
+        except Exception:
+            n_present = 0
+        if n_present > 0:
+            # Short-circuit: same count as the deterministic positional selection
+            # means complete (same seed+corpus => same id set); suspect content is
+            # --force_rebuild's job, not resume's. Otherwise fetch ids only.
+            if n_present == n_expected:
+                missing = []
+            else:
+                try:
+                    existing_ids = set(_get_all_ids(chroma_collection))
+                    if len(existing_ids) != n_present:
+                        tqdm.write(f"[WARN] id listing incomplete ({len(existing_ids)}/{n_present}); some present docs may re-encode")
+                except Exception:
+                    existing_ids = set()
+                missing = [i for i in range(n_expected) if str(i) not in existing_ids]
+        else:
+            missing = list(range(n_expected))
+        _just_built = False
+        if n_expected > 0 and missing:
+            _just_built = True
     if n_expected > 0 and not missing and n_present > n_expected:
         tqdm.write(f"[CHROMA] collection holds {n_present} docs for {n_expected} corpus rows; reusing as-is")
     if n_expected > 0 and missing:
@@ -375,6 +390,11 @@ def binary_retriever(
         if _use_ev:
             tqdm.write(f"[ENCODE-device] h2d={t_h2d_ev:.1f}s fwd={t_fwd_ev:.1f}s d2h={t_d2h_ev:.1f}s "
                        f"(CUDA Events; host-vs-device gap = queue drain misattribution)")
+
+    # Record proven-complete (reaching here means every missing id was added;
+    # add() raises on failure, so partial states never get marked).
+    if (not force_rebuild) and n_expected > 0 and (not missing or _just_built):
+        _POPULATED_CACHE[_pop_key] = True
 
     # 6. Retrieve top conflicts
     article_vector, top_conflicts = find_top_conflicts(
