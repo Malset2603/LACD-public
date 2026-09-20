@@ -13,6 +13,12 @@ import polars as pl
 import openai
 import numpy as np
 import math
+import time
+
+# Per-phase benchmark timers (mirrors [ENCODE]): accumulated across
+# retrieve_top_conflicts calls, reported once after the query loop.
+_QTIMES = {"bi": 0.0, "rerank1": 0.0, "expand": 0.0, "rerank2": 0.0, "other": 0.0}
+_QN = 0
 
 class RetrievalContext:
     def __init__(self, args, reranker, reranker_tokenizer, article_network, chroma_collection, conflicts, chroma_db_name, laws_df=None):
@@ -33,8 +39,9 @@ class RetrievalContext:
 
 def retrieve_top_conflicts(query, context, threashold=0):
 
-    global top_conflicts_lens
-    
+    global top_conflicts_lens, _QN
+    _QN += 1
+
     top_conflicts = list()
     # laws_df is loaded once in RetrievalContext.__init__ and reused by
     # reference. Lazy-cache here as a safety net for contexts built without
@@ -50,14 +57,19 @@ def retrieve_top_conflicts(query, context, threashold=0):
 
     if context.args.retrieval_method == "retrieval":
 
+        _t = time.perf_counter()
         article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer, max_length=retriever_max_length, fp16=retriever_fp16, force_rebuild=retriever_force_rebuild, article_network=context.article_network)
+        _QTIMES["bi"] += time.perf_counter() - _t
 
 
     elif context.args.retrieval_method == "re2":
 
         if context.args.rex_method == "rocchio":
             from src.methods.ReX.rex_methods import rocchio_binary_retriever
+            _t = time.perf_counter()
             article_vector, top_conflicts = rocchio_binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer)
+            _QTIMES["bi"] += time.perf_counter() - _t
+            _t = time.perf_counter()
             final_conflicts = cross_retriever(
                 query, 
                 top_conflicts, 
@@ -70,20 +82,26 @@ def retrieve_top_conflicts(query, context, threashold=0):
                 fp16=retriever_fp16,
                 query_vector=article_vector,
             )
+            _QTIMES["rerank1"] += time.perf_counter() - _t
 
+            _t = time.perf_counter()
             top_conflicts = sorted(final_conflicts, key=lambda x: x[1], reverse=True)
             if threashold == 0:
                 top_conflicts = [c[0] for c in top_conflicts]
             else:
                 top_conflicts = [c[0] for c in top_conflicts if c[1] > threashold]
+            _QTIMES["other"] += time.perf_counter() - _t
 
 
         elif context.args.rex_method == "rex2":
 
+            _t = time.perf_counter()
             article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, top_k=args.biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer, max_length=retriever_max_length, fp16=retriever_fp16, force_rebuild=retriever_force_rebuild, article_network=context.article_network)
+            _QTIMES["bi"] += time.perf_counter() - _t
 
             top_conflicts_I = top_conflicts[:args.biencoder_top_k]
 
+            _t = time.perf_counter()
             predicts_from_reranker = cross_retriever(
                 query, 
                 top_conflicts_I, 
@@ -96,7 +114,9 @@ def retrieve_top_conflicts(query, context, threashold=0):
                 fp16=retriever_fp16,
                 query_vector=article_vector,
             )
+            _QTIMES["rerank1"] += time.perf_counter() - _t
 
+            _t = time.perf_counter()
             p_calib = lambda p, t: 1 / (1 + math.exp(-math.log(p / (1 - p)) / t))
             TEMPERATURE = 1
             PTC = 0.704  # Probability of Triadic Closure (Paper App. A.2 & A.3)
@@ -115,8 +135,10 @@ def retrieve_top_conflicts(query, context, threashold=0):
             )
             
             rex_top_conflicts = gold_retriever(prestige_articles)
-            
+            _QTIMES["expand"] += time.perf_counter() - _t
 
+
+            _t = time.perf_counter()
             final_conflicts = predicts_from_reranker + cross_retriever(
                 query, 
                 rex_top_conflicts, 
@@ -129,7 +151,9 @@ def retrieve_top_conflicts(query, context, threashold=0):
                 fp16=retriever_fp16,
                 query_vector=article_vector,
             )
+            _QTIMES["rerank2"] += time.perf_counter() - _t
 
+            _t = time.perf_counter()
             final_conflicts = sorted(final_conflicts, key=lambda x: x[1], reverse=True)
 
             top_conflicts_lens.append(len(final_conflicts))
@@ -139,11 +163,15 @@ def retrieve_top_conflicts(query, context, threashold=0):
                 top_conflicts = [c[0] for c in final_conflicts]
             else:
                 top_conflicts = [c[0] for c in final_conflicts if c[1] > threashold]
+            _QTIMES["other"] += time.perf_counter() - _t
 
         elif context.args.rex_method == "baseline":
             
+            _t = time.perf_counter()
             article_vector, top_conflicts = binary_retriever(biencoder_model, laws_df, context.chroma_collection, query, biencoder_top_k, batch_size=batch_size, tokenizer = tokenizer, max_length=retriever_max_length, fp16=retriever_fp16, force_rebuild=retriever_force_rebuild, article_network=context.article_network)
+            _QTIMES["bi"] += time.perf_counter() - _t
 
+            _t = time.perf_counter()
             final_conflicts = cross_retriever(
                 query, 
                 top_conflicts, 
@@ -156,24 +184,31 @@ def retrieve_top_conflicts(query, context, threashold=0):
                 fp16=retriever_fp16,
                 query_vector=article_vector,
             )
+            _QTIMES["rerank1"] += time.perf_counter() - _t
 
+            _t = time.perf_counter()
             top_conflicts = sorted(final_conflicts, key=lambda x: x[1], reverse=True)
             
             if threashold == 0:
                 top_conflicts = [c[0] for c in top_conflicts]
             else:
                 top_conflicts = [c[0] for c in top_conflicts if c[1] > threashold]
+            _QTIMES["other"] += time.perf_counter() - _t
         else:
             assert(0)
         
 
     elif context.args.retrieval_method == "tfidf":
         from src.encoders.bi_encoder.retriever.classical_retriever import find_top_conflicts_with_tfidf as tfidf_retriever
+        _t = time.perf_counter()
         top_conflicts = tfidf_retriever(query, context.chroma_db_name, top_k=biencoder_top_k)
+        _QTIMES["other"] += time.perf_counter() - _t
 
     elif context.args.retrieval_method == "bm25":
         from src.encoders.bi_encoder.retriever.classical_retriever import find_top_conflicts_with_bm25 as bm25_retriever
+        _t = time.perf_counter()
         top_conflicts = bm25_retriever(query, context.chroma_db_name, top_k=biencoder_top_k)
+        _QTIMES["other"] += time.perf_counter() - _t
 
     else:
         assert(0)
@@ -398,6 +433,14 @@ if __name__ == "__main__":
                 f"std={np.std(top_conflicts_lens):.2f}",
                 f"================================================",
                 sep="\n"
+            )
+
+        # Per-phase benchmark timings (totals + per-query average)
+        if _QN > 0:
+            _qsum = max(sum(_QTIMES.values()), 1e-9)
+            print(
+                f"[QUERY] n={_QN} " +
+                " ".join(f"{k}={v:.1f}s ({v/_qsum:.0%},{v/max(_QN,1):.2f}s/q)" for k, v in _QTIMES.items())
             )
 
         import os
