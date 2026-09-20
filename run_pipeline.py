@@ -79,7 +79,7 @@ def main():
     parser.add_argument("--eval_batch_size", type=int, default=None, help="Batch size for Chroma DB build and retrieval/eval (default: 32, decoupled from training --batch_size since inference needs no gradients)")
     parser.add_argument("--fp16", action="store_true", help="Enable fp16 (training Steps 1 & 3, plus retrieval encoding in Steps 2 & 4 via --fp16_eval)")
     parser.add_argument("--fp16_eval", action="store_true", help="Enable fp16 autocast for retrieval encoding in Steps 2 & 4 (CUDA only; verify recall parity first)")
-    parser.add_argument("--force_rebuild", action="store_true", help="Wipe the Chroma collection and rebuild from scratch in Steps 2 & 4 (use when content is suspect; partial DBs otherwise resume)")
+    parser.add_argument("--force_rebuild", action="store_true", help="Wipe the Chroma collection and rebuild from scratch in Step 2 (use when content is suspect; partial DBs otherwise resume)")
     parser.add_argument("--gradient_checkpointing", action="store_true", help="Enable gradient checkpointing to save VRAM")
     parser.add_argument("--top_k", type=int, default=10, help="Top-K cutoff for retrieval evaluation in Step 5")
     parser.add_argument("--eval_ks", type=str, default="5,10,50", help="Comma-separated cutoffs for nDCG/Recall/F1 in Step 5 (default: 5,10,50)")
@@ -208,8 +208,9 @@ def main():
         ] + subset_args()
         if args.fp16 or args.fp16_eval:
             cmd.append("--fp16_eval")
-        if args.force_rebuild:
-            cmd.append("--force_rebuild")
+        # NOTE: never forward --force_rebuild here: Step 4 calls
+        # binary_retriever per query, so a rebuild flag would wipe and
+        # re-encode the entire DB on EVERY query. Rebuilds belong to Step 2.
         run_cmd(cmd, dry_run=args.dry_run)
 
     # Step 5: Eval
