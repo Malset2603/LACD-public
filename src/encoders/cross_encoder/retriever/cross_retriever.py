@@ -86,6 +86,17 @@ def cross_retriever(query, top_k_articles, cross_encoder_model, tokenizer, artic
     # List to store results
     conflicts = []
 
+    # Hoisted (once per call, not per batch): map every candidate to its graph
+    # index up front, then slice per batch. Identical values; transfers drop
+    # from per-batch to one. KeyError surfaces before the first batch instead
+    # of mid-loop, with the same net effect (the query fails either way).
+    all_article2_idx = torch.tensor(
+        [article_network.article_key_to_idx[article_key_function(a)] for a in top_k_articles],
+        dtype=torch.long,
+        device=device,
+    )
+    article1_idx_full = torch.full((len(top_k_articles),), article_idx, dtype=torch.long, device=device)
+
     # Process top_k_articles in batches
     for i in range(0, len(top_k_articles), batch_size):
         batch_articles = top_k_articles[i:i+batch_size]
@@ -105,18 +116,15 @@ def cross_retriever(query, top_k_articles, cross_encoder_model, tokenizer, artic
             return_tensors="pt"
         )
 
-        # Move input tensors to the appropriate device
-        input_ids = inputs['input_ids'].to(device) # type: ignore
-        attention_mask = inputs['attention_mask'].to(device) # type: ignore
+        # Move input tensors to the appropriate device (pinned staging makes
+        # the non_blocking launch genuinely async; the forward syncs as needed)
+        input_ids = inputs['input_ids'].pin_memory().to(device, non_blocking=True) # type: ignore
+        attention_mask = inputs['attention_mask'].pin_memory().to(device, non_blocking=True) # type: ignore
 
 
 
-        article2_idx_list = [
-            article_network.article_key_to_idx[article_key_function(retrieved_article)]
-            for retrieved_article in batch_articles
-        ]
-        article1_idx_tensor = torch.tensor([article_idx for _ in batch_articles]).to(device)
-        article2_idx_tensor = torch.tensor(article2_idx_list).to(device)  # Convert to tensor and move to device
+        article2_idx_tensor = all_article2_idx[i:i+len(batch_articles)]
+        article1_idx_tensor = article1_idx_full[i:i+len(batch_articles)]
 
 
         # Get model prediction for the batch
@@ -247,12 +255,14 @@ def noLM_cross_retriever(article, top_k_articles, model_path, article_network:Ar
             batch_articles = [b+"\ncase:\n"+generate_case(None, None, b) for b in batch_articles]
 
         # Tokenize the batch of (article, batch_articles) pairs
-        article2_idx_list = [
-            article_network.article_key_to_idx[article_key_function(retrieved_article)]
-            for retrieved_article in batch_articles
-        ]
-        article1_idx_tensor = torch.tensor([article_idx for retrieved_article in batch_articles]).to(device)
-        article2_idx_tensor = torch.tensor(article2_idx_list).to(device)  # Convert to tensor and move to device
+        # NOTE: mapping stays per-batch (not hoisted): method == "caseaug"
+        # rewrites batch texts mid-loop with cache side effects, so upfront
+        # mapping would change behavior. Single device-side construction only.
+        article2_idx_tensor = torch.tensor(
+            [article_network.article_key_to_idx[article_key_function(retrieved_article)]
+             for retrieved_article in batch_articles],
+            dtype=torch.long, device=device)
+        article1_idx_tensor = torch.full((len(batch_articles),), article_idx, dtype=torch.long, device=device)
 
         # Get model prediction for the batch
         with torch.no_grad():
