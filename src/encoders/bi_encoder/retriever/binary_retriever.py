@@ -236,6 +236,15 @@ def binary_retriever(
         # background tokenization threads are worth building later).
         t_tok = t_h2d = t_fwd = t_d2h = t_add = 0.0
         n_d2h = n_add = 0
+        # Device-true timings (A): CUDA Events separate real device work from
+        # host-side queue drain that perf_counter misattributes. Reused across
+        # batches; CPU path keeps host timers only.
+        _use_ev = use_cuda
+        if _use_ev:
+            _ev = {k: torch.cuda.Event(enable_timing=True) for k in ("h0", "h1", "f0", "f1", "d0", "d1")}
+            t_h2d_ev = t_fwd_ev = t_d2h_ev = 0.0
+        else:
+            _ev = None
         # Length bucketing (DESCENDING): homogeneous lengths keep
         # padding="longest" batches tight (measured ~3.4x fewer forward tokens
         # on laws.csv), while peak-first ordering is allocator-friendly: the
@@ -260,11 +269,19 @@ def binary_retriever(
                 return_tensors="pt"
             )
             _t1 = time.perf_counter()
+            if _use_ev:
+                _ev["h0"].record()
             input_ids = batch_inputs["input_ids"].to(model.encoder.device)
             attention_mask = batch_inputs["attention_mask"].to(model.encoder.device)
+            if _use_ev:
+                _ev["h1"].record()
+                torch.cuda.synchronize()
+                t_h2d_ev += _ev["h0"].elapsed_time(_ev["h1"]) / 1000.0
             _t2 = time.perf_counter()
 
             try:
+                if _use_ev:
+                    _ev["f0"].record()
                 with torch.inference_mode(), autocast_ctx:
                     encoder_to_use = model.passage_encoder if hasattr(model, "passage_encoder") else model.encoder
                     encoded_articles = encoder_to_use(input_ids=input_ids, attention_mask=attention_mask)
@@ -272,6 +289,10 @@ def binary_retriever(
                     # view pinning the full (B, L, H) output alive, so
                     # .contiguous() materializes just the rows we keep.
                     pooled_gpu = encoded_articles.last_hidden_state[:, 0, :].contiguous()
+                if _use_ev:
+                    _ev["f1"].record()
+                    torch.cuda.synchronize()
+                    t_fwd_ev += _ev["f0"].elapsed_time(_ev["f1"]) / 1000.0
                 _t3 = time.perf_counter()
             except RuntimeError as e:
                 if "out of memory" not in str(e).lower():
@@ -298,7 +319,13 @@ def binary_retriever(
                 _t4 = time.perf_counter()
                 # cat (not stack): buffered batches vary in size (tail partial
                 # batch, OOM step-down), so equal-size stacking is wrong here.
+                if _use_ev:
+                    _ev["d0"].record()
                 block = torch.cat(gpu_buf).cpu().numpy()
+                if _use_ev:
+                    _ev["d1"].record()
+                    torch.cuda.synchronize()
+                    t_d2h_ev += _ev["d0"].elapsed_time(_ev["d1"]) / 1000.0
                 t_d2h += time.perf_counter() - _t4
                 n_d2h += 1
                 del gpu_buf[:]
@@ -323,6 +350,9 @@ def binary_retriever(
         tqdm.write(f"[ENCODE] tok={t_tok:.1f}s ({t_tok/t_sum:.0%}) h2d={t_h2d:.1f}s ({t_h2d/t_sum:.0%}) "
                    f"fwd={t_fwd:.1f}s ({t_fwd/t_sum:.0%}) d2h={t_d2h:.1f}s ({t_d2h/t_sum:.0%}, {n_d2h} transfers) "
                    f"add={t_add:.1f}s ({t_add/t_sum:.0%}, {n_add} chunks)")
+        if _use_ev:
+            tqdm.write(f"[ENCODE-device] h2d={t_h2d_ev:.1f}s fwd={t_fwd_ev:.1f}s d2h={t_d2h_ev:.1f}s "
+                       f"(CUDA Events; host-vs-device gap = queue drain misattribution)")
 
     # 6. Retrieve top conflicts
     article_vector, top_conflicts = find_top_conflicts(
