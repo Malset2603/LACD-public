@@ -139,18 +139,23 @@ def retrieve_top_conflicts(query, context, threashold=0):
 
 
             _t = time.perf_counter()
-            final_conflicts = predicts_from_reranker + cross_retriever(
-                query, 
-                rex_top_conflicts, 
-                cross_encoder_model=context.reranker, 
-                tokenizer=context.reranker_tokenizer, 
-                article_network=context.article_network, 
-                index_method=crossencoder_index_method,
-                batch_size=batch_size,
-                max_length=retriever_max_length,
-                fp16=retriever_fp16,
-                query_vector=article_vector,
-            )
+            # Skip the second rerank when expansion found nothing: identical
+            # result (predicts + []) without a wasted full-graph GNN encode.
+            if rex_top_conflicts:
+                final_conflicts = predicts_from_reranker + cross_retriever(
+                    query,
+                    rex_top_conflicts,
+                    cross_encoder_model=context.reranker,
+                    tokenizer=context.reranker_tokenizer,
+                    article_network=context.article_network,
+                    index_method=crossencoder_index_method,
+                    batch_size=batch_size,
+                    max_length=retriever_max_length,
+                    fp16=retriever_fp16,
+                    query_vector=article_vector,
+                )
+            else:
+                final_conflicts = predicts_from_reranker
             _QTIMES["rerank2"] += time.perf_counter() - _t
 
             _t = time.perf_counter()
