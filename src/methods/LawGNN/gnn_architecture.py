@@ -280,10 +280,17 @@ class GCNCrossEncoderModel(CrossEncoderModel):
         # Override the classifier with the correct input size
         self.classifier = torch.nn.Linear(combined_input_size, 1)
 
-    def forward(self, article1_idx, article2_idx, input_ids=None, attention_mask=None, labels=None):
+    def encode_graph_nodes(self):
+        """Batch-independent GNN node encodings (identical for every batch of a query)."""
         x = self.conv1(self.vector_tensor, self.edge_index_tensor)
         x = F.relu(x)
-        x = self.conv2(x, self.edge_index_tensor)
+        return self.conv2(x, self.edge_index_tensor)
+
+    def forward(self, article1_idx, article2_idx, input_ids=None, attention_mask=None, labels=None, precomputed_nodes=None):
+        if precomputed_nodes is None:
+            x = self.encode_graph_nodes()
+        else:
+            x = precomputed_nodes
 
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
         pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird"] else outputs.last_hidden_state[:, -1, :]  # BERT는 [CLS], GPT는 마지막 토큰 사용
@@ -326,10 +333,17 @@ class SAGECrossEncoderModel(CrossEncoderModel):
         # Override the classifier with the correct input size
         self.classifier = torch.nn.Linear(combined_input_size, 1)
 
-    def forward(self, article1_idx, article2_idx, input_ids=None, attention_mask=None, labels=None):
+    def encode_graph_nodes(self):
+        """Batch-independent GNN node encodings (identical for every batch of a query)."""
         x = self.conv1(self.vector_tensor, self.edge_index_tensor)
         x = F.relu(x)
-        x = self.conv2(x, self.edge_index_tensor)
+        return self.conv2(x, self.edge_index_tensor)
+
+    def forward(self, article1_idx, article2_idx, input_ids=None, attention_mask=None, labels=None, precomputed_nodes=None):
+        if precomputed_nodes is None:
+            x = self.encode_graph_nodes()
+        else:
+            x = precomputed_nodes
 
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
         pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird"] else outputs.last_hidden_state[:, -1, :]  # BERT는 [CLS], GPT는 마지막 토큰 사용
@@ -370,10 +384,17 @@ class GATv2CrossEncoderModel(CrossEncoderModel):
         # Override the classifier with the correct input size
         self.classifier = torch.nn.Linear(combined_input_size, 1)
 
-    def forward(self, article1_idx, article2_idx, input_ids=None, attention_mask=None, labels=None):
+    def encode_graph_nodes(self):
+        """Batch-independent GNN node encodings (identical for every batch of a query)."""
         x = self.conv1(self.vector_tensor, self.edge_index_tensor)
         x = F.relu(x)
-        x = self.conv2(x, self.edge_index_tensor)
+        return self.conv2(x, self.edge_index_tensor)
+
+    def forward(self, article1_idx, article2_idx, input_ids=None, attention_mask=None, labels=None, precomputed_nodes=None):
+        if precomputed_nodes is None:
+            x = self.encode_graph_nodes()
+        else:
+            x = precomputed_nodes
 
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
         pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird"] else outputs.last_hidden_state[:, -1, :]  # BERT는 [CLS], GPT는 마지막 토큰 사용

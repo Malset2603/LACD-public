@@ -72,6 +72,14 @@ def cross_retriever(query, top_k_articles, cross_encoder_model, tokenizer, artic
     use_cuda = torch.cuda.is_available()
     autocast_ctx = torch.autocast(device_type="cuda" if use_cuda else "cpu", dtype=torch.float16, enabled=bool(fp16) and use_cuda)
 
+    # Per-query GNN cache (eval only): conv output depends solely on tensors +
+    # weights, identical for every batch of this query (slot already updated
+    # above). No cross-query state is kept. Training callers never pass it.
+    cached_nodes = None
+    if index_method != "none" and not cross_encoder_model.training and hasattr(cross_encoder_model, "encode_graph_nodes"):
+        with torch.inference_mode(), autocast_ctx:
+            cached_nodes = cross_encoder_model.encode_graph_nodes()
+
     retrieval_start_time = time.time()
 
 
@@ -114,8 +122,13 @@ def cross_retriever(query, top_k_articles, cross_encoder_model, tokenizer, artic
         # Get model prediction for the batch
         with torch.inference_mode(), autocast_ctx:
             if index_method != "none":
-                outputs = cross_encoder_model(article1_idx=article1_idx_tensor,article2_idx=article2_idx_tensor,
-                input_ids=input_ids, attention_mask=attention_mask)
+                _fwd_kwargs = dict(article1_idx=article1_idx_tensor, article2_idx=article2_idx_tensor,
+                                   input_ids=input_ids, attention_mask=attention_mask)
+                # Vanilla has no conv layers (hence no encode_graph_nodes):
+                # only models with a cache get the extra kwarg.
+                if cached_nodes is not None:
+                    _fwd_kwargs["precomputed_nodes"] = cached_nodes
+                outputs = cross_encoder_model(**_fwd_kwargs)
             else:
                 outputs = cross_encoder_model(input_ids=input_ids, attention_mask=attention_mask)
 
