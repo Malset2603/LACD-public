@@ -198,9 +198,22 @@ def parse_ks(ks_str):
     return sorted(ks)
 
 
+def _safe_key(text):
+    """article_key_function with raw-text fallback (eval must never crash)."""
+    from src.utils.utils import article_key_function
+
+    try:
+        return article_key_function(text)
+    except Exception:
+        return text
+
+
 def build_binary_markings(results, true_dicts, true_dicts_with_known_conflicts, article_network=None):
     """Mark each retrieved article as 1/0 per query (same rule as benchmark mode).
 
+    true_dicts is keyed by NORMALIZED article keys while result rows may carry
+    raw full texts, so both sides are normalized here (idempotent on keyed
+    files, which benchmark mode already produces via data-key-refine).
     article_network is only needed for type breakdowns; scoring uses the binary
     markings alone, so None skips types without changing any metric.
     """
@@ -208,17 +221,18 @@ def build_binary_markings(results, true_dicts, true_dicts_with_known_conflicts, 
 
     markings = []
     for r in results:
-        query = r["article_to_check"]
-        instance = {"article_to_check": query, "articles_as_binary": []}
-        true_articles = set(true_dicts.get(query, []))
-        known = set(true_dicts_with_known_conflicts.get(query, []))
+        qkey = _safe_key(r["article_to_check"])
+        instance = {"article_to_check": qkey, "articles_as_binary": []}
+        true_articles = set(true_dicts.get(qkey, []))
+        known = set(true_dicts_with_known_conflicts.get(qkey, []))
         types = []
         for a in r["articles"]:
-            if a in known and a not in true_articles:
+            akey = _safe_key(a)
+            if akey in known and akey not in true_articles:
                 continue
-            instance["articles_as_binary"].append(1 if a in true_articles else 0)
+            instance["articles_as_binary"].append(1 if akey in true_articles else 0)
             if article_network is not None:
-                types.append(classify_type(query, a, article_network) if a in true_articles else "NONE")
+                types.append(classify_type(qkey, akey, article_network) if akey in true_articles else "NONE")
         instance["articles_as_types"] = types
         markings.append(instance)
     return markings
