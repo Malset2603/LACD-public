@@ -70,6 +70,22 @@ def find_top_conflicts(article, model, tokenizer, chroma_collection, top_k=10, i
     return pooled_output, top_k_articles
 
 
+def _get_all_ids(chroma_collection, page_size=20000):
+    """Fetch every id via limit/offset pagination: a single get() may truncate,
+    which would make resume re-encode present docs (duplicate-add warnings)."""
+    ids = []
+    offset = 0
+    while True:
+        page = chroma_collection.get(include=[], limit=page_size, offset=offset)["ids"]
+        if not page:
+            break
+        ids.extend(page)
+        if len(page) < page_size:
+            break
+        offset += page_size
+    return ids
+
+
 def binary_retriever(
     model,
     laws_df,
@@ -174,7 +190,7 @@ def binary_retriever(
     if force_rebuild:
         try:
             # include=[]: ids only, skip deserializing full documents.
-            _wipe_ids = chroma_collection.get(include=[])["ids"]
+            _wipe_ids = _get_all_ids(chroma_collection)
         except Exception:
             _wipe_ids = []
         if _wipe_ids:
@@ -198,7 +214,9 @@ def binary_retriever(
             missing = []
         else:
             try:
-                existing_ids = set(chroma_collection.get(include=[])["ids"])
+                existing_ids = set(_get_all_ids(chroma_collection))
+                if len(existing_ids) != n_present:
+                    tqdm.write(f"[WARN] id listing incomplete ({len(existing_ids)}/{n_present}); some present docs may re-encode")
             except Exception:
                 existing_ids = set()
             missing = [i for i in range(n_expected) if str(i) not in existing_ids]
