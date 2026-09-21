@@ -83,7 +83,7 @@ def main():
     parser.add_argument("--gradient_checkpointing", action="store_true", help="Enable gradient checkpointing to save VRAM")
     parser.add_argument("--top_k", type=int, default=10, help="Top-K cutoff for retrieval evaluation in Step 5")
     parser.add_argument("--eval_ks", type=str, default="5,10,50", help="Comma-separated cutoffs for nDCG/Recall/F1 in Step 5 (default: 5,10,50)")
-    parser.add_argument("--biencoder_top_k", type=int, default=150, help="Top-K retrieval depth in Step 4 (paper default: 150; lower it, e.g. 5-10, for fast experiments)")
+    parser.add_argument("--biencoder_top_k", type=int, default=150, help="Top-K retrieval depth in Step 4 (paper Sec 4.2: 100 for GReX/ReX+Re2 -> ~150 after expand, 150 for Re2/Re2+LGNN; lower it, e.g. 5-10, for fast experiments)")
     # GReX / ReX expansion options (default: 'rex2' for full GReX method)
     parser.add_argument("--rex_method", type=str, default="rex2", choices=["rex2", "baseline", "rocchio"],
                         help="ReX expansion method: 'rex2' (GReX full method, default), 'baseline' (Re2+LGNN without expansion), or 'rocchio'")
