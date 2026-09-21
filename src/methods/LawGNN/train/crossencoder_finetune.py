@@ -259,8 +259,9 @@ if __name__ == "__main__":
         fp16=args.fp16,
         gradient_checkpointing=args.gradient_checkpointing,
 
-        # load_best_model_at_end=True,                 # load the best model at the end
-        # metric_for_best_model="eval_loss",           # metric to use for model selection
+        load_best_model_at_end=True,                 # best (not last) weights flow to Step 4 via torch.save below
+        metric_for_best_model="eval_loss",           # neutral model-selection metric
+        greater_is_better=False,                     # explicit: lower eval_loss wins
     )
 
     writer = SummaryWriter()
