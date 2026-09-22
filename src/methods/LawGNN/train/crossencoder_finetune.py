@@ -259,9 +259,10 @@ if __name__ == "__main__":
         fp16=args.fp16,
         gradient_checkpointing=args.gradient_checkpointing,
 
-        load_best_model_at_end=True,                 # best (not last) weights flow to Step 4 via torch.save below
-        metric_for_best_model="eval_loss",           # neutral model-selection metric
-        greater_is_better=False,                     # explicit: lower eval_loss wins
+        # Keep the final epoch weights. Do not load the best checkpoint here
+        # so training always runs the full epoch count and saves the last state.
+        # load_best_model_at_end=True,
+        # metric_for_best_model="eval_loss",
     )
 
     writer = SummaryWriter()

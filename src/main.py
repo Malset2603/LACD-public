@@ -119,8 +119,9 @@ def retrieve_top_conflicts(query, context, threashold=0):
             _t = time.perf_counter()
             p_calib = lambda p, t: 1 / (1 + math.exp(-math.log(p / (1 - p)) / t))
             TEMPERATURE = 1
-            PTC = 0.704  # Probability of Triadic Closure (Paper App. A.2 & A.3)
+            PTC = 0.704  # Probability of Triadic Closure
 
+            # Filter threshold for expansion.
             minimum_score = min([p_calib(float(c[1]), TEMPERATURE) for c in predicts_from_reranker])
 
             predicts_from_reranker_filtering = [c[0] for c in predicts_from_reranker if p_calib(float(c[1]), TEMPERATURE) > minimum_score/PTC]

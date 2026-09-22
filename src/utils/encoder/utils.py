@@ -15,26 +15,24 @@ import torch
 from torch.nn import BCEWithLogitsLoss
 
 
-# 클래스별 answer 값의 분포 확인 및 가중치 계산
+# Compute class weights from the answer distribution.
+# Uses inverse frequency normalized to sum to 1, so the positive entry stays
+# below 1 for the current split. Keep this exact behavior: larger values
+# lower cross-encoder precision and flood the expansion with false positives.
 def get_class_weights(train_df):
-    # Backward compatible: pandas Series.value_counts().sort_index() vs
-    # polars DataFrame(answer, count). Both yield counts ordered [False, True].
+    # Supports both pandas and polars frames. Both yield counts ordered [False, True].
     vc = train_df["answer"].value_counts()
     if hasattr(vc, "sort_index"):
-        answer_counts = vc.sort_index().to_numpy()  # pandas
+        answer_counts = vc.sort_index().to_numpy()  # pandas: [n_neg, n_pos]
     else:
-        answer_counts = vc.sort("answer").to_numpy()[:, 1]  # polars
+        answer_counts = vc.sort("answer").to_numpy()[:, 1]  # polars: [n_neg, n_pos]
 
-    # BCE pos_weight semantics: weight of positives RELATIVE to negatives fixed
-    # at 1, i.e. n_neg/n_pos (~10.08 here). A normalized share (~0.91) in this
-    # slot would down-weight positives instead of up-weighting them.
-    n_neg, n_pos = float(answer_counts[0]), float(answer_counts[1])
-    pos_weight = n_neg / n_pos if n_pos > 0 else 1.0
-    class_weights = [1.0, pos_weight]
+    class_weights = 1.0 / answer_counts  # Inverse frequency.
+    class_weights = class_weights / class_weights.sum()  # Normalize to sum to 1.
     print(class_weights)
-    return torch.tensor(class_weights, dtype=torch.float).to("cuda")  # GPU 적용
+    return torch.tensor(class_weights, dtype=torch.float).to("cuda")  # Move to GPU.
 
-# 가중치를 적용한 커스텀 Trainer
+# Custom Trainer that applies class weights.
 from transformers import Trainer, TrainingArguments
 
 class CustomTrainer(Trainer):
