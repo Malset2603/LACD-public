@@ -249,21 +249,28 @@ def score_at_ks(markings, true_dicts, ks):
         total_retrieved = 0
         recall = 0.0
         total_ndcg = 0.0
+        total_f1 = 0.0
         for r in markings:
             binary_list = r["articles_as_binary"]
             topk_list = binary_list[:k]
-            total_true_positives += sum(topk_list)
+            tp = sum(topk_list)
+            total_true_positives += tp
             total_retrieved += len(topk_list)
             denom = len(true_dicts.get(r["article_to_check"], []))
             if denom > 0:
-                recall += sum(topk_list) / denom
+                rec_i = tp / denom
+                prec_i = tp / len(topk_list) if len(topk_list) > 0 else 0.0
+                # macro-F1 per paper App A.8: average of per-query F1@n
+                f1_i = 2 * prec_i * rec_i / (prec_i + rec_i) if (prec_i + rec_i) > 0 else 0.0
+                recall += rec_i
+                total_f1 += f1_i
                 ideal_binary = [1 for _ in range(denom)] + [0 for _ in range(max(0, k - denom))]
             else:
                 ideal_binary = [0] * k
             total_ndcg += compute_ndcg(binary_list, ideal_binary, k)
         recall = recall / n_samples * 100
         precision = (total_true_positives / total_retrieved * 100) if total_retrieved > 0 else 0.0
-        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+        f1 = total_f1 / n_samples * 100
         ndcg = total_ndcg / n_samples * 100
         out[str(k)] = {"ndcg": ndcg, "recall": recall, "f1": f1}
     return out

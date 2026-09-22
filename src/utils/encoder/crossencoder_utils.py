@@ -39,7 +39,7 @@ class RuleHierarchicalEncoderModel(torch.nn.Module):
         attention_mask = attention_mask.view(-1, seq_length)
 
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        sentence_embeddings = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird"] else outputs.last_hidden_state[:, -1, :]
+        sentence_embeddings = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird", "roberta"] else outputs.last_hidden_state[:, -1, :]
 
         sentence_embeddings = sentence_embeddings.view(batch_size, num_sentences, -1)
         transformer_output = self.transformer_encoder(sentence_embeddings)  # Transformer 적용
@@ -90,11 +90,11 @@ class RuleCrossEncoderModel(torch.nn.Module):
         # Rule 인코딩
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
 
-        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird"] else outputs.last_hidden_state[:, -1, :]  # BERT는 [CLS], GPT는 마지막 토큰 사용
+        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird", "roberta"] else outputs.last_hidden_state[:, -1, :]  # BERT는 [CLS], GPT는 마지막 토큰 사용
 
 
         rule_outputs = self.rule_encoder(input_ids=rule_input_ids, attention_mask=rule_attention_mask)
-        rule_pooled_output = rule_outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird"] else outputs.last_hidden_state[:, -1, :]  # BERT는 [CLS], GPT는 마지막 토큰 사용
+        rule_pooled_output = rule_outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird", "roberta"] else rule_outputs.last_hidden_state[:, -1, :]  # BERT는 [CLS], GPT는 마지막 토큰 사용
 
 
         # TODO: pooled output 과 rule pooled output 을 합쳐서 combined output 을 생성
@@ -194,7 +194,7 @@ class CrossEncoderModel(torch.nn.Module):
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
         
         # Use the [CLS] token representation for classification
-        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird"] else outputs.last_hidden_state[:, -1, :]  # BERT는 [CLS], GPT는 마지막 토큰 사용
+        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird", "roberta"] else outputs.last_hidden_state[:, -1, :]  # BERT는 [CLS], GPT는 마지막 토큰 사용
         
         pooled_output = self.dropout(pooled_output)
 

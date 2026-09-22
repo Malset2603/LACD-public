@@ -439,8 +439,8 @@ if __name__ == "__main__":
         test_f1 = test_results.get("eval_f1", 0)
         test_accuracy = test_results.get("eval_accuracy", 0)
         test_roc_auc = test_results.get("eval_roc_auc", 0)
-        test_precision = test_results.get("eval_recall", 0)
-        test_recall = test_results.get("eval_precision", 0)
+        test_precision = test_results.get("eval_precision", 0)
+        test_recall = test_results.get("eval_recall", 0)
 
         print(f"Test F1 Score: {test_f1:.1%}")
         print(f"Test precision Score: {test_precision:.1%}")

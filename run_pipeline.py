@@ -187,7 +187,6 @@ def main():
                         help="Temperature for InfoNCE (only when --biencoder_loss=infonce, recommended 0.05)")
     parser.add_argument("--steps", type=str, default="all", help="Steps to run: 'all' or comma list like '1,2,3,4,5'")
     parser.add_argument("--dry_run", action="store_true", help="Print commands without executing")
-    parser.add_argument("--force", action="store_true", help="Overwrite existing outputs (default: overwrite)")
 
     args = parser.parse_args()
     seeds = args.seed if isinstance(args.seed, list) else parse_seeds(args.seed)

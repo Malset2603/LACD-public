@@ -240,11 +240,12 @@ class NoGNNCrossEncoderModel(CrossEncoderModel):
         x = self.vector_tensor
 
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird"] else outputs.last_hidden_state[:, -1, :]  # BERT는 [CLS], GPT는 마지막 토큰 사용
+        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird", "roberta"] else outputs.last_hidden_state[:, -1, :]  # BERT는 [CLS], GPT는 마지막 토큰 사용
         pooled_output = self.dropout(pooled_output)
 
-        # 내적 계산 (inner product)
-        ip_sim = torch.sum(x[article1_idx] * x[article2_idx], dim=1)
+        # cosine similarity in [-1, 1]: same scale as the text branch, so the
+        # single Linear(769, 1) head is not dominated by raw dot magnitudes
+        ip_sim = F.cosine_similarity(x[article1_idx], x[article2_idx], dim=1)
         ip_sim = ip_sim.unsqueeze(1)  # 1차원 텐서를 2차원으로 변환
 
         combined_output = torch.cat([
@@ -293,11 +294,12 @@ class GCNCrossEncoderModel(CrossEncoderModel):
             x = precomputed_nodes
 
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird"] else outputs.last_hidden_state[:, -1, :]  # BERT는 [CLS], GPT는 마지막 토큰 사용
+        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird", "roberta"] else outputs.last_hidden_state[:, -1, :]  # BERT는 [CLS], GPT는 마지막 토큰 사용
         pooled_output = self.dropout(pooled_output)
 
-        # 내적 계산 (inner product)
-        ip_sim = torch.sum(x[article1_idx] * x[article2_idx], dim=1)
+        # cosine similarity in [-1, 1]: same scale as the text branch, so the
+        # single Linear(769, 1) head is not dominated by raw dot magnitudes
+        ip_sim = F.cosine_similarity(x[article1_idx], x[article2_idx], dim=1)
         ip_sim = ip_sim.unsqueeze(1)  # 1차원 텐서를 2차원으로 변환
 
         combined_output = torch.cat([
@@ -346,11 +348,12 @@ class SAGECrossEncoderModel(CrossEncoderModel):
             x = precomputed_nodes
 
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird"] else outputs.last_hidden_state[:, -1, :]  # BERT는 [CLS], GPT는 마지막 토큰 사용
+        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird", "roberta"] else outputs.last_hidden_state[:, -1, :]  # BERT는 [CLS], GPT는 마지막 토큰 사용
         pooled_output = self.dropout(pooled_output)
 
-        # 내적 계산 (inner product)
-        ip_sim = torch.sum(x[article1_idx] * x[article2_idx], dim=1)
+        # cosine similarity in [-1, 1]: same scale as the text branch, so the
+        # single Linear(769, 1) head is not dominated by raw dot magnitudes
+        ip_sim = F.cosine_similarity(x[article1_idx], x[article2_idx], dim=1)
         ip_sim = ip_sim.unsqueeze(1)  # 1차원 텐서를 2차원으로 변환
 
         combined_output = torch.cat([
@@ -397,11 +400,12 @@ class GATv2CrossEncoderModel(CrossEncoderModel):
             x = precomputed_nodes
 
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird"] else outputs.last_hidden_state[:, -1, :]  # BERT는 [CLS], GPT는 마지막 토큰 사용
+        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird", "roberta"] else outputs.last_hidden_state[:, -1, :]  # BERT는 [CLS], GPT는 마지막 토큰 사용
         pooled_output = self.dropout(pooled_output)
 
-        # 내적 계산 (inner product)
-        ip_sim = torch.sum(x[article1_idx] * x[article2_idx], dim=1)
+        # cosine similarity in [-1, 1]: same scale as the text branch, so the
+        # single Linear(769, 1) head is not dominated by raw dot magnitudes
+        ip_sim = F.cosine_similarity(x[article1_idx], x[article2_idx], dim=1)
         ip_sim = ip_sim.unsqueeze(1)  # 1차원 텐서를 2차원으로 변환
 
         combined_output = torch.cat([
