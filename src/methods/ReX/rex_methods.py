@@ -8,6 +8,9 @@ def rex2(query, articles, conflicts, predicts_from_reranker, k0):
     true_articles = [a for a in articles[:k0] if a in predicts_from_reranker.get(query, []) and a != query]
 
     tested_articles = [article_key_function(a) for a in articles[:k0]]
+    import copy
+    conflicts = copy.deepcopy(conflicts)
+    conflicts[query] = []
     prestige_articles = []
     # print(true_articles)
     for t in true_articles:
@@ -16,7 +19,7 @@ def rex2(query, articles, conflicts, predicts_from_reranker, k0):
 
     prestige_articles = list(set([article_key_function(p) for p in prestige_articles]))
 
-    result_articles = [p for p in prestige_articles if p not in tested_articles]
+    result_articles = [p for p in prestige_articles if p not in tested_articles and p != query]
 
     result_articles.sort()
 
