@@ -15,22 +15,24 @@ import torch
 from torch.nn import BCEWithLogitsLoss
 
 
-# Compute class weights from the answer distribution.
-# Uses inverse frequency normalized to sum to 1, so the positive entry stays
-# below 1 for the current split. Keep this exact behavior: larger values
-# lower cross-encoder precision and flood the expansion with false positives.
+# Compute class weights for BCEWithLogitsLoss.
+# In PyTorch, BCEWithLogitsLoss(pos_weight=p) weights the positive class relative to
+# the negative class (which implicitly has weight 1.0).
+# Per paper Section 4.3 (Weighted BCE with w_T / w_F ratio), for imbalanced classes
+# (e.g. ~2278 neg vs ~226 pos, ~10:1 ratio), pos_weight = n_neg / n_pos balances
+# loss contributions so both classes contribute equally to gradients.
 def get_class_weights(train_df):
-    # Supports both pandas and polars frames. Both yield counts ordered [False, True].
     vc = train_df["answer"].value_counts()
     if hasattr(vc, "sort_index"):
         answer_counts = vc.sort_index().to_numpy()  # pandas: [n_neg, n_pos]
     else:
         answer_counts = vc.sort("answer").to_numpy()[:, 1]  # polars: [n_neg, n_pos]
 
-    class_weights = 1.0 / answer_counts  # Inverse frequency.
-    class_weights = class_weights / class_weights.sum()  # Normalize to sum to 1.
-    print(class_weights)
-    return torch.tensor(class_weights, dtype=torch.float).to("cuda")  # Move to GPU.
+    n_neg = float(answer_counts[0])
+    n_pos = float(answer_counts[1])
+    pos_weight = n_neg / n_pos if n_pos > 0 else 1.0
+    print(f"[CLASS WEIGHTS] n_neg={n_neg:.0f}, n_pos={n_pos:.0f}, pos_weight={pos_weight:.4f}")
+    return pos_weight
 
 # Custom Trainer that applies class weights.
 from transformers import Trainer, TrainingArguments
@@ -38,15 +40,23 @@ from transformers import Trainer, TrainingArguments
 class CustomTrainer(Trainer):
     def __init__(self, class_weights, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.class_weights = class_weights
+        if isinstance(class_weights, (int, float)):
+            self.pos_weight_val = float(class_weights)
+        elif hasattr(class_weights, "__len__") and len(class_weights) > 1:
+            w_neg = float(class_weights[0])
+            w_pos = float(class_weights[1])
+            self.pos_weight_val = (w_pos / w_neg) if w_neg > 0 else w_pos
+        else:
+            self.pos_weight_val = 1.0
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-        labels = inputs.get("labels").float()  # BCEWithLogitsLoss는 float labels 필요
+        labels = inputs.get("labels").float()  # BCEWithLogitsLoss requires float labels
         outputs = model(**inputs)
-        logits = outputs.get("logits").squeeze(-1)  # (batch_size, 1) → (batch_size,)
+        logits = outputs.get("logits").squeeze(-1)  # (batch_size, 1) -> (batch_size,)
 
-        loss_fct = BCEWithLogitsLoss(pos_weight=self.class_weights[1])  # Binary classification에서 가중치 적용
-        loss = loss_fct(logits, labels)  # BCEWithLogitsLoss 적용
+        pos_weight = torch.tensor(self.pos_weight_val, device=labels.device, dtype=torch.float)
+        loss_fct = BCEWithLogitsLoss(pos_weight=pos_weight)
+        loss = loss_fct(logits, labels)
 
         return (loss, outputs) if return_outputs else loss
 

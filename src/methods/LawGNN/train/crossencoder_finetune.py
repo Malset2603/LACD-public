@@ -259,10 +259,9 @@ if __name__ == "__main__":
         fp16=args.fp16,
         gradient_checkpointing=args.gradient_checkpointing,
 
-        # Keep the final epoch weights. Do not load the best checkpoint here
-        # so training always runs the full epoch count and saves the last state.
-        # load_best_model_at_end=True,
-        # metric_for_best_model="eval_loss",
+        load_best_model_at_end=True,                 # Load best checkpoint based on eval_loss
+        metric_for_best_model="eval_loss",           # Evaluate using validation loss
+        greater_is_better=False,                     # Lower eval_loss is better
     )
 
     writer = SummaryWriter()

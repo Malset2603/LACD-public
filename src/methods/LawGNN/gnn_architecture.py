@@ -240,7 +240,7 @@ class NoGNNCrossEncoderModel(CrossEncoderModel):
         x = self.vector_tensor
 
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird"] else outputs.last_hidden_state[:, -1, :]  # Use first token for BERT-style encoders, last token otherwise.
+        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird", "roberta"] else outputs.last_hidden_state[:, -1, :]  # Use first token for BERT/RoBERTa-style encoders, last token otherwise.
         pooled_output = self.dropout(pooled_output)
 
         # Inner product between node representations.
@@ -293,7 +293,7 @@ class GCNCrossEncoderModel(CrossEncoderModel):
             x = precomputed_nodes
 
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird"] else outputs.last_hidden_state[:, -1, :]  # Use first token for BERT-style encoders, last token otherwise.
+        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird", "roberta"] else outputs.last_hidden_state[:, -1, :]  # Use first token for BERT/RoBERTa-style encoders, last token otherwise.
         pooled_output = self.dropout(pooled_output)
 
         # Inner product between node representations.
@@ -346,7 +346,7 @@ class SAGECrossEncoderModel(CrossEncoderModel):
             x = precomputed_nodes
 
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird"] else outputs.last_hidden_state[:, -1, :]  # Use first token for BERT-style encoders, last token otherwise.
+        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird", "roberta"] else outputs.last_hidden_state[:, -1, :]  # Use first token for BERT/RoBERTa-style encoders, last token otherwise.
         pooled_output = self.dropout(pooled_output)
 
         # Inner product between node representations.
@@ -397,7 +397,7 @@ class GATv2CrossEncoderModel(CrossEncoderModel):
             x = precomputed_nodes
 
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird"] else outputs.last_hidden_state[:, -1, :]  # Use first token for BERT-style encoders, last token otherwise.
+        pooled_output = outputs.last_hidden_state[:, 0, :] if self.encoder.config.model_type in ["bert", "big_bird", "roberta"] else outputs.last_hidden_state[:, -1, :]  # Use first token for BERT/RoBERTa-style encoders, last token otherwise.
         pooled_output = self.dropout(pooled_output)
 
         # Inner product between node representations.
