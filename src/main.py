@@ -117,14 +117,21 @@ def retrieve_top_conflicts(query, context, threashold=0):
             _QTIMES["rerank1"] += time.perf_counter() - _t
 
             _t = time.perf_counter()
-            p_calib = lambda p, t: 1 / (1 + math.exp(-math.log(p / (1 - p)) / t))
+            def p_calib(p, t=1):
+                p_clamped = max(min(float(p), 1.0 - 1e-7), 1e-7)
+                return 1 / (1 + math.exp(-math.log(p_clamped / (1 - p_clamped)) / t))
+
             TEMPERATURE = 1
-            PTC = 0.704  # Probability of Triadic Closure
+            PTC = 0.704  # Probability of Triadic Closure (paper Sec 3.2)
 
-            # Filter threshold for expansion.
+            # Filter threshold for expansion (paper Sec 3.2: min / PTC)
             minimum_score = min([p_calib(float(c[1]), TEMPERATURE) for c in predicts_from_reranker])
+            threshold = min(minimum_score / PTC, 0.99)
 
-            predicts_from_reranker_filtering = [c[0] for c in predicts_from_reranker if p_calib(float(c[1]), TEMPERATURE) > minimum_score/PTC]
+            predicts_from_reranker_filtering = [c[0] for c in predicts_from_reranker if p_calib(float(c[1]), TEMPERATURE) > threshold]
+            if not predicts_from_reranker_filtering and predicts_from_reranker:
+                # Fallback to top-ranked candidate to prevent silent expansion collapse
+                predicts_from_reranker_filtering = [predicts_from_reranker[0][0]]
 
             # 
             prestige_articles = rex2(
