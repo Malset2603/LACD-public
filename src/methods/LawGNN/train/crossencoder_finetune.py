@@ -259,9 +259,10 @@ if __name__ == "__main__":
         fp16=args.fp16,
         gradient_checkpointing=args.gradient_checkpointing,
 
-        load_best_model_at_end=True,                 # Load best checkpoint based on eval_loss
-        metric_for_best_model="eval_loss",           # Evaluate using validation loss
-        greater_is_better=False,                     # Lower eval_loss is better
+        # Keep the final epoch weights per upstream and paper.
+        # Do not load best checkpoint based on eval_loss to allow full convergence.
+        # load_best_model_at_end=True,
+        # metric_for_best_model="eval_loss",
     )
 
     writer = SummaryWriter()
