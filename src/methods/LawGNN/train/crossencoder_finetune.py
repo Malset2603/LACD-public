@@ -190,10 +190,9 @@ if __name__ == "__main__":
 
     # Model initialization
 
-    # Build vector table sized to total nodes (not max edge index) to include isolated nodes.
-    # Single bulk H2D transfer: assemble the full matrix on CPU first instead of
-    # N individual GPU allocations plus a second full copy in torch.stack.
-    num_nodes = len(article_network.all_article_keys)
+    # Create vectors as tensor matching upstream: sized to max_node_idx + 1
+    max_node_idx = edge_index_tensor.max().item()
+    num_nodes = int(max_node_idx + 1)
     vector_matrix = np.zeros((num_nodes, embedding_size), dtype=np.float32)
     for idx, entry in collection_dict.items():
         emb = entry.get("embedding", None)

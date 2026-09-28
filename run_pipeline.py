@@ -159,12 +159,13 @@ def main():
     parser.add_argument("--subset_ratio", type=float, default=None, help="Subset ratio for train/val/test stratified sampling (e.g. 0.15)")
     parser.add_argument("--subset_seed", type=int, default=42, help="Seed for subset sampling")
     parser.add_argument("--seed", type=parse_seeds, default=[42], help="Seed(s) for model training in Steps 1 & 3 (single 42 or comma list 0,1,2; multi-seed runs each seed and aggregates mean/std)")
-    parser.add_argument("--model", type=str, default="monologg/kobigbird-bert-base", help="Bi/cross encoder model")
+    parser.add_argument("--model", type=str, default="monologg/kobigbird-bert-base", help="Bi-encoder backbone model (default: monologg/kobigbird-bert-base per paper Sec 4.2)")
+    parser.add_argument("--cross_model", type=str, default="klue/roberta-base", help="Cross-encoder backbone model (default: klue/roberta-base per paper Sec 4.2)")
     parser.add_argument("--gnn_method", type=str, default="gat", choices=["gcn", "graphsage", "gat", "vanilla", "gathybrid", "graphsagehybrid"], help="GNN method")
-    parser.add_argument("--epoch", type=int, default=3, help="Epochs for bi and cross training (cross uses this value, the default value is 3)")
-    parser.add_argument("--bi_epoch", type=int, default=None, help="Epochs for bi-encoder only (default: --epoch)")
+    parser.add_argument("--epoch", type=int, default=10, help="Epochs for cross-encoder training (default: 10 per paper/upstream)")
+    parser.add_argument("--bi_epoch", type=int, default=0, help="Epochs for bi-encoder training (default: 0 = frozen KoBigBird per paper/upstream)")
     parser.add_argument("--max_length", type=int, default=4096, help="Max token length (default 4096 full, use 512 for mini VRAM)")
-    parser.add_argument("--batch_size", type=int, default=4, help="Batch size for training (default 4)")
+    parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training (default: 16 per upstream)")
     parser.add_argument("--eval_batch_size", type=int, default=None, help="Batch size for Chroma DB build and retrieval/eval (default: 32, decoupled from training --batch_size since inference needs no gradients)")
     parser.add_argument("--fp16", action="store_true", help="Enable fp16 (training Steps 1 & 3, plus retrieval encoding in Steps 2 & 4 via --fp16_eval)")
     parser.add_argument("--fp16_eval", action="store_true", help="Enable fp16 autocast for retrieval encoding in Steps 2 & 4 (CUDA only; verify recall parity first)")
@@ -172,12 +173,14 @@ def main():
     parser.add_argument("--gradient_checkpointing", action="store_true", help="Enable gradient checkpointing to save VRAM")
     parser.add_argument("--top_k", type=int, default=10, help="Top-K cutoff for retrieval evaluation in Step 5")
     parser.add_argument("--eval_ks", type=str, default="5,10,50", help="Comma-separated cutoffs for nDCG/Recall/F1 in Step 5 (default: 5,10,50)")
-    parser.add_argument("--biencoder_top_k", type=int, default=150, help="Top-K retrieval depth in Step 4 (paper Sec 4.2: 100 for GReX/ReX+Re2 -> ~150 after expand, 150 for Re2/Re2+LGNN; lower it, e.g. 5-10, for fast experiments)")
+    parser.add_argument("--biencoder_top_k", type=int, default=100, help="Top-K retrieval depth in Step 4 (paper Sec 4.2: 100 for GReX/ReX+Re2 -> ~150 after expand, 150 for Re2/Re2+LGNN)")
     # GReX / ReX expansion options (default: 'rex2' for full GReX method)
     parser.add_argument("--rex_method", type=str, default="rex2", choices=["rex2", "baseline", "rocchio"],
                         help="ReX expansion method: 'rex2' (GReX full method, default), 'baseline' (Re2+LGNN without expansion), or 'rocchio'")
     parser.add_argument("--rex_conflict", type=str, default="train", choices=["train", "train-generate"],
                         help="Conflict graph source for ReX expansion ('train' or 'train-generate')")
+    parser.add_argument("--ptc", type=float, default=0.75,
+                        help="Probability of Triadic Closure threshold divisor for ReX (default: 0.75 per upstream code, 0.704 per paper Sec 3.2)")
     parser.add_argument("--gnn_edge_way", type=str, default="both", choices=["both", "forward", "backward"],
                         help="Edge propagation direction in ArticleNetwork ('both', 'forward', 'backward')")
     # Phase 1a: bi-encoder loss selection (default keeps original GReX BCE)
@@ -281,6 +284,7 @@ def main():
         if 3 in steps:
             cmd = [
                 sys.executable, "./src/methods/LawGNN/train/crossencoder_finetune.py",
+                "--model", args.cross_model,
                 "--tag", cross_tag,
                 "--gnn_method", args.gnn_method,
                 "--chroma_db_name", chroma_name,
@@ -308,6 +312,7 @@ def main():
                 "--crossencoder_index_method", args.gnn_method,
                 "--rex_method", args.rex_method,
                 "--rex_conflict", args.rex_conflict,
+                "--ptc", str(args.ptc),
                 "--gnn_edge_way", args.gnn_edge_way,
                 "--mode", "test-benchmark",
                 "--output_dir", output_dir,

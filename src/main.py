@@ -122,9 +122,9 @@ def retrieve_top_conflicts(query, context, threashold=0):
                 return 1 / (1 + math.exp(-math.log(p_clamped / (1 - p_clamped)) / t))
 
             TEMPERATURE = 1
-            PTC = 0.704  # Probability of Triadic Closure (paper Sec 3.2)
+            PTC = getattr(context.args, "ptc", 0.75)  # 0.75 in upstream code, 0.704 in paper Sec 3.2
 
-            # Filter threshold for expansion (paper Sec 3.2: min / PTC)
+            # Filter threshold for expansion (upstream: min / 0.75, paper Sec 3.2: min / PTC)
             minimum_score = min([p_calib(float(c[1]), TEMPERATURE) for c in predicts_from_reranker])
             threshold = min(minimum_score / PTC, 0.99)
 
@@ -280,6 +280,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--rex_method", type=str, choices=["baseline", "rex2", "rocchio"], default="baseline")
     parser.add_argument("--rex_conflict", type=str, choices=["train", "train-generate"], default="train")
+    parser.add_argument("--ptc", type=float, default=0.75, help="Probability of Triadic Closure threshold divisor (default: 0.75 per upstream code, 0.704 per paper Sec 3.2)")
     parser.add_argument("--multi-fold", type=bool, default=False)
     parser.add_argument("--multi-fold-k", type=int, default=5)
     parser.add_argument("--train_query_path", type=str, default="./data/datasets/LACD-retrieval/queries.jsonl")

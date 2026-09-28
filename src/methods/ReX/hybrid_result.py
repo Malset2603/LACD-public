@@ -5,7 +5,6 @@ import copy
 import sys
 import os
 from tqdm import tqdm
-import matplotlib.pyplot as plt
 from src.utils.utils import article_key_function
 from src.utils.retrieval_methods.gold import article_dictionary_list, gold_retriever
 import re

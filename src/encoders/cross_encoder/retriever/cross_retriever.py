@@ -42,7 +42,8 @@ def cross_retriever(query, top_k_articles, cross_encoder_model, tokenizer, artic
     base_n = cross_encoder_model._base_node_count
 
     query_key = article_key_function(query)
-    is_new_query = query_key not in article_network.article_key_to_idx
+    node_idx = article_network.article_key_to_idx.get(query_key)
+    is_new_query = node_idx is None or node_idx >= base_n
     if is_new_query:
         article_idx = base_n
         if index_method != "none":
@@ -67,7 +68,7 @@ def cross_retriever(query, top_k_articles, cross_encoder_model, tokenizer, artic
             with torch.no_grad():
                 cross_encoder_model.vector_tensor[base_n].copy_(query_vector_tensor.flatten())
     else:
-        article_idx = article_network.article_key_to_idx[query_key]
+        article_idx = node_idx
     # fp16 autocast scope (CUDA only; no-op otherwise, never mutates the model)
     use_cuda = torch.cuda.is_available()
     autocast_ctx = torch.autocast(device_type="cuda" if use_cuda else "cpu", dtype=torch.float16, enabled=bool(fp16) and use_cuda)
@@ -91,7 +92,7 @@ def cross_retriever(query, top_k_articles, cross_encoder_model, tokenizer, artic
     # from per-batch to one. KeyError surfaces before the first batch instead
     # of mid-loop, with the same net effect (the query fails either way).
     all_article2_idx = torch.tensor(
-        [article_network.article_key_to_idx[article_key_function(a)] for a in top_k_articles],
+        [min(article_network.article_key_to_idx.get(article_key_function(a), base_n), base_n) for a in top_k_articles],
         dtype=torch.long,
         device=device,
     )
